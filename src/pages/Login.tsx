@@ -26,6 +26,82 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
+  const RepoGraph = ({
+    className,
+    style,
+  }: {
+    className: string;
+    style?: React.CSSProperties;
+  }) => (
+    <svg className={className} style={style} viewBox="0 0 200 200">
+      <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+        <path
+          d="M100 32 C100 58 76 72 60 96"
+          className="repo-graph__line stroke-primary"
+          style={{ animationDelay: "0ms" }}
+        />
+        <path
+          d="M100 32 C100 58 124 72 140 96"
+          className="repo-graph__line stroke-primary"
+          style={{ animationDelay: "140ms" }}
+        />
+        <path
+          d="M60 96 C74 118 86 132 100 162"
+          className="repo-graph__line stroke-accent"
+          style={{ animationDelay: "320ms" }}
+        />
+        <path
+          d="M140 96 C126 118 114 132 100 162"
+          className="repo-graph__line stroke-accent"
+          style={{ animationDelay: "460ms" }}
+        />
+        <path
+          d="M100 162 C100 176 100 186 100 192"
+          className="repo-graph__line stroke-primary"
+          style={{ animationDelay: "620ms" }}
+        />
+      </g>
+
+      <g>
+        <circle
+          cx="100"
+          cy="32"
+          r="8"
+          className="repo-graph__node fill-primary"
+          style={{ animationDelay: "0ms" }}
+        />
+        <circle
+          cx="60"
+          cy="96"
+          r="8"
+          className="repo-graph__node fill-accent"
+          style={{ animationDelay: "220ms" }}
+        />
+        <circle
+          cx="140"
+          cy="96"
+          r="8"
+          className="repo-graph__node fill-primary"
+          style={{ animationDelay: "300ms" }}
+        />
+        <circle
+          cx="100"
+          cy="162"
+          r="8"
+          className="repo-graph__node fill-accent"
+          style={{ animationDelay: "520ms" }}
+        />
+        <circle
+          cx="100"
+          cy="192"
+          r="5"
+          className="repo-graph__node fill-primary"
+          style={{ animationDelay: "720ms" }}
+        />
+      </g>
+    </svg>
+  );
+
   const from = searchParams?.get("from") || "/dashboard";
 
   useEffect(() => {
@@ -149,8 +225,16 @@ export default function Login() {
         style={{ animationDelay: "1.5s" }}
       />
 
+      {/* Animated repo graph (git tree) decoration */}
+      <div className="absolute inset-0 pointer-events-none opacity-25">
+        <RepoGraph
+          className="absolute left-[-140px] top-1/2 -translate-y-1/2 w-[28rem] h-[28rem] rotate-[-8deg]"
+          style={{ filter: "blur(0.25px)" }}
+        />
+      </div>
+
       {/* Login Card */}
-      <Card className="w-full max-w-md glass glow-primary relative z-10 animate-fade-in-up">
+      <Card className="w-full max-w-md glass glow-primary relative z-10 animate-fade-in-up overflow-hidden">
         <CardHeader className="text-center pb-4">
           <Link
             href="/"
@@ -169,7 +253,10 @@ export default function Login() {
 
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
+            <div
+              className="space-y-2 animate-fade-in-up"
+              style={{ animationDelay: "70ms" }}
+            >
               <label htmlFor="email" className="text-sm font-medium">
                 Email
               </label>
@@ -187,7 +274,10 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div
+              className="space-y-2 animate-fade-in-up"
+              style={{ animationDelay: "120ms" }}
+            >
               <label htmlFor="password" className="text-sm font-medium">
                 Password
               </label>
@@ -205,7 +295,10 @@ export default function Login() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-sm">
+            <div
+              className="flex items-center justify-between text-sm animate-fade-in-up"
+              style={{ animationDelay: "170ms" }}
+            >
               <label className="flex items-center cursor-pointer">
                 <input type="checkbox" className="mr-2 rounded border-input" />
                 <span className="text-muted-foreground">Remember me</span>

@@ -9,6 +9,7 @@ const credentials_1 = __importDefault(require("next-auth/providers/credentials")
 const prisma_1 = __importDefault(require("@/lib/prisma"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const dns_1 = __importDefault(require("dns"));
+const google_auth_library_1 = require("google-auth-library");
 // Some environments resolve Google endpoints to IPv6 first, but IPv6 egress may be blocked.
 // This avoids intermittent OAuth callback failures like AggregateError [ETIMEDOUT].
 dns_1.default.setDefaultResultOrder("ipv4first");
@@ -175,6 +176,45 @@ const isGoogleConfigured = !!googleClientId &&
     !!googleClientSecret &&
     !looksLikePlaceholder(googleClientId) &&
     !looksLikePlaceholder(googleClientSecret);
+const googleTokenVerifier = isGoogleConfigured
+    ? new google_auth_library_1.OAuth2Client({ clientId: googleClientId })
+    : null;
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function isTransientNetworkError(error) {
+    const anyErr = error;
+    const code = anyErr?.code;
+    const message = anyErr?.message || "";
+    return (code === "ETIMEDOUT" ||
+        code === "ECONNRESET" ||
+        code === "EAI_AGAIN" ||
+        code === "ENOTFOUND" ||
+        message.includes("ETIMEDOUT") ||
+        message.includes("ECONNRESET"));
+}
+async function verifyGoogleIdToken(idToken) {
+    if (!googleTokenVerifier || !googleClientId) {
+        throw new Error("Google OAuth is not configured");
+    }
+    // Retry once for intermittent network/cert-fetch issues.
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            return await googleTokenVerifier.verifyIdToken({
+                idToken,
+                audience: googleClientId,
+            });
+        }
+        catch (err) {
+            if (attempt === 0 && isTransientNetworkError(err)) {
+                await sleep(200);
+                continue;
+            }
+            throw err;
+        }
+    }
+    throw new Error("Google token verification failed");
+}
 if ((googleClientId || googleClientSecret) && !isGoogleConfigured) {
     // Intentionally do not log secrets.
     console.warn("[auth] Google OAuth is not fully configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to real values (not placeholders), then restart the dev server.");
@@ -237,7 +277,18 @@ exports.authOptions = {
                 const user = await prisma_1.default.user.findUnique({
                     where: { email: credentials.email },
                 });
-                if (!user || !user.passwordHash) {
+                if (!user) {
+                    throw new Error("Invalid email or password");
+                }
+                // Security: never allow password login for Google-only accounts.
+                // A "Google-only" account has no local passwordHash, but does have a linked Google provider account.
+                if (!user.passwordHash) {
+                    const hasGoogleAccount = (await prisma_1.default.account.count({
+                        where: { userId: user.id, provider: "google" },
+                    })) > 0;
+                    if (hasGoogleAccount) {
+                        throw new Error("Email already exists. Please sign in with Google.");
+                    }
                     throw new Error("Invalid email or password");
                 }
                 const isValidPassword = await bcryptjs_1.default.compare(credentials.password, user.passwordHash);
@@ -311,18 +362,52 @@ exports.authOptions = {
         async signIn({ user, account, profile }) {
             // If signing in with OAuth and user exists, allow linking
             if (account?.provider === "google") {
-                const existingUser = await prisma_1.default.user.findUnique({
-                    where: { email: user.email },
-                });
-                if (existingUser) {
-                    // Update avatar if from Google
-                    const googleProfile = profile;
-                    if (googleProfile?.picture && !existingUser.image) {
-                        await prisma_1.default.user.update({
-                            where: { id: existingUser.id },
-                            data: { image: googleProfile.picture },
-                        });
+                try {
+                    // Security: always verify Google ID token server-side.
+                    // NextAuth handles the OAuth code exchange, but we still validate the returned id_token.
+                    const idToken = account.id_token;
+                    if (!idToken) {
+                        throw new Error("Missing Google id_token");
                     }
+                    const ticket = await verifyGoogleIdToken(idToken);
+                    const payload = ticket.getPayload();
+                    const googleEmail = payload?.email;
+                    const googleSub = payload?.sub;
+                    if (!googleEmail || !user.email) {
+                        throw new Error("Google token missing email");
+                    }
+                    if (googleEmail.toLowerCase() !== user.email.toLowerCase()) {
+                        throw new Error("Google token email mismatch");
+                    }
+                    // providerAccountId should be the Google subject. If it exists and doesn't match, reject.
+                    if (googleSub &&
+                        account.providerAccountId &&
+                        String(account.providerAccountId) !== String(googleSub)) {
+                        throw new Error("Google token subject mismatch");
+                    }
+                    const existingUser = await prisma_1.default.user.findUnique({
+                        where: { email: user.email },
+                    });
+                    if (existingUser) {
+                        // Update avatar if from Google
+                        const googleProfile = profile;
+                        if (googleProfile?.picture && !existingUser.image) {
+                            await prisma_1.default.user.update({
+                                where: { id: existingUser.id },
+                                data: { image: googleProfile.picture },
+                            });
+                        }
+                    }
+                }
+                catch (err) {
+                    // Avoid logging secrets/tokens. Provide enough context to diagnose.
+                    console.error("[auth] google oauth callback failed", {
+                        message: err?.message,
+                        code: err?.code,
+                        providerAccountId: account?.providerAccountId,
+                        hasUserEmail: !!user?.email,
+                    });
+                    throw err;
                 }
             }
             return true;

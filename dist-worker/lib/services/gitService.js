@@ -105,19 +105,48 @@ function normalizeNumstatFilePath(rawPath) {
     }
     return after;
 }
+function shellEscapeSingleQuoted(value) {
+    // Safe for POSIX shells: wrap in single quotes and escape embedded single quotes.
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+}
 class GitService {
     repoPath;
     constructor(repoPath) {
         this.repoPath = repoPath;
     }
+    async listTreeNames(treePath) {
+        try {
+            const treeish = treePath ? `HEAD:${treePath}` : "HEAD";
+            const { stdout } = await execPromise(`cd "${this.repoPath}" && git ls-tree --name-only ${shellEscapeSingleQuoted(treeish)}`, { timeout: DEFAULT_GIT_TIMEOUT_MS });
+            return stdout
+                .split("\n")
+                .map((s) => s.trim())
+                .filter(Boolean);
+        }
+        catch {
+            return [];
+        }
+    }
+    async showFileAtHead(filePath) {
+        try {
+            const spec = `HEAD:${filePath}`;
+            const { stdout } = await execPromise(`cd "${this.repoPath}" && git show ${shellEscapeSingleQuoted(spec)}`, { timeout: DEFAULT_GIT_TIMEOUT_MS });
+            return typeof stdout === "string" ? stdout : "";
+        }
+        catch {
+            return null;
+        }
+    }
     /**
      * Clone a repository to a temporary directory
      */
-    static async cloneRepository(url, destination) {
+    static async cloneRepository(url, destination, opts) {
         try {
             await fs.mkdir(destination, { recursive: true });
-            // Clone with all branches (--no-single-branch fetches all branches)
-            await execPromise(`git -c credential.interactive=never -c core.askPass= -c filter.lfs.required=false -c filter.lfs.smudge= -c filter.lfs.process= clone --no-tags --depth 1000 --no-single-branch "${url}" "${destination}"`, {
+            const depth = Math.max(1, Math.min(opts?.depth ?? 1000, 1000));
+            const noSingleBranch = opts?.noSingleBranch ?? true;
+            // Clone with all branches by default (--no-single-branch fetches all branches)
+            await execPromise(`git -c credential.interactive=never -c core.askPass= -c filter.lfs.required=false -c filter.lfs.smudge= -c filter.lfs.process= clone --no-tags --depth ${depth} ${noSingleBranch ? "--no-single-branch" : "--single-branch"} "${url}" "${destination}"`, {
                 // Cloning can take a while on larger repos.
                 timeout: GIT_CLONE_TIMEOUT_MS,
             });

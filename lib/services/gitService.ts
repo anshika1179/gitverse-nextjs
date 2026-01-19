@@ -19,7 +19,7 @@ const MAX_FILE_BYTES_TO_READ_FOR_LINECOUNT = 256 * 1024; // 256KB
 
 function execPromise(
   command: string,
-  options: ExecOptions = {}
+  options: ExecOptions = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return execPromiseRaw(command, {
     ...DEFAULT_EXEC_OPTIONS,
@@ -160,17 +160,20 @@ export class GitService {
    */
   static async cloneRepository(
     url: string,
-    destination: string
+    destination: string,
+    opts?: { depth?: number; noSingleBranch?: boolean },
   ): Promise<GitService> {
     try {
       await fs.mkdir(destination, { recursive: true });
-      // Clone with all branches (--no-single-branch fetches all branches)
+      const depth = Math.max(1, Math.min(opts?.depth ?? 1000, 1000));
+      const noSingleBranch = opts?.noSingleBranch ?? true;
+      // Clone with all branches by default (--no-single-branch fetches all branches)
       await execPromise(
-        `git -c credential.interactive=never -c core.askPass= -c filter.lfs.required=false -c filter.lfs.smudge= -c filter.lfs.process= clone --no-tags --depth 1000 --no-single-branch "${url}" "${destination}"`,
+        `git -c credential.interactive=never -c core.askPass= -c filter.lfs.required=false -c filter.lfs.smudge= -c filter.lfs.process= clone --no-tags --depth ${depth} ${noSingleBranch ? "--no-single-branch" : "--single-branch"} "${url}" "${destination}"`,
         {
           // Cloning can take a while on larger repos.
           timeout: GIT_CLONE_TIMEOUT_MS,
-        }
+        },
       );
       const gitService = new GitService(destination);
       return gitService;
@@ -186,14 +189,14 @@ export class GitService {
     try {
       const { stdout: defaultBranch } = await execPromise(
         `cd "${this.repoPath}" && git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'`,
-        { timeout: DEFAULT_GIT_TIMEOUT_MS }
+        { timeout: DEFAULT_GIT_TIMEOUT_MS },
       );
       const defaultBranchName = defaultBranch.trim();
 
       // Get both local and remote branches
       const { stdout } = await execPromise(
         `cd "${this.repoPath}" && git for-each-ref --format='%(refname:short)|%(committerdate:iso)|%(objectname)' refs/heads/ refs/remotes/origin/`,
-        { timeout: DEFAULT_GIT_TIMEOUT_MS }
+        { timeout: DEFAULT_GIT_TIMEOUT_MS },
       );
 
       const branches: BranchData[] = [];
@@ -215,14 +218,14 @@ export class GitService {
 
         const { stdout: commitCount } = await execPromise(
           `cd "${this.repoPath}" && git rev-list --count "${fullName}"`,
-          { timeout: DEFAULT_GIT_TIMEOUT_MS }
+          { timeout: DEFAULT_GIT_TIMEOUT_MS },
         );
 
         branches.push({
           name,
           isDefault: name === defaultBranchName,
           isProtected: ["main", "master", "develop", "production"].includes(
-            name
+            name,
           ),
           commitCount: parseInt(commitCount.trim()),
           lastCommitAt: new Date(date),
@@ -240,7 +243,7 @@ export class GitService {
    */
   async getCommits(
     branch: string = "HEAD",
-    limit: number = MAX_COMMITS_DEFAULT
+    limit: number = MAX_COMMITS_DEFAULT,
   ): Promise<CommitData[]> {
     try {
       const effectiveLimit = Math.max(1, Math.min(limit, MAX_COMMITS_DEFAULT));
@@ -303,7 +306,7 @@ export class GitService {
             commitBranch = headMatch[1].trim().replace(/^origin\//, "");
           } else {
             const branchMatch = refsStr.match(
-              /(?:origin\/)?([a-zA-Z0-9_\-\/]+)(?=,|$|\))/
+              /(?:origin\/)?([a-zA-Z0-9_\-\/]+)(?=,|$|\))/,
             );
             if (branchMatch && !branchMatch[1].includes("tag:")) {
               commitBranch = branchMatch[1].trim().replace(/^origin\//, "");
@@ -353,7 +356,7 @@ export class GitService {
         // Shortstat line: "N files changed, X insertions(+), Y deletions(-)"
         if (line.includes("changed") || line.includes("file")) {
           const match = line.match(
-            /(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/
+            /(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/,
           );
           if (match) {
             currentFilesChanged = parseInt(match[1]);
@@ -409,7 +412,7 @@ export class GitService {
       // Contributor scans can be expensive; cap by commit count.
       const { stdout } = await execPromise(
         `cd "${this.repoPath}" && git log --format="%an|%ae|%aI" --numstat -n ${MAX_CONTRIBUTOR_COMMITS}`,
-        { timeout: GIT_LOG_TIMEOUT_MS }
+        { timeout: GIT_LOG_TIMEOUT_MS },
       );
 
       const contributorMap = new Map<string, ContributorData>();
@@ -591,7 +594,7 @@ export class GitService {
     try {
       const { stdout } = await execPromise(
         `cd "${this.repoPath}" && git ls-files`,
-        { timeout: DEFAULT_GIT_TIMEOUT_MS }
+        { timeout: DEFAULT_GIT_TIMEOUT_MS },
       );
 
       const files: {
@@ -740,7 +743,7 @@ export class GitService {
     try {
       const { stdout } = await execPromise(
         `cd "${this.repoPath}" && du -sb . | cut -f1`,
-        { timeout: DEFAULT_GIT_TIMEOUT_MS }
+        { timeout: DEFAULT_GIT_TIMEOUT_MS },
       );
       return parseInt(stdout.trim());
     } catch (error: any) {

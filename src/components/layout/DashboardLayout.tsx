@@ -49,7 +49,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   };
 
   const navItems = [
-    { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+    { icon: LayoutDashboard, label: "Visualise", path: "/dashboard" },
     { icon: Search, label: "Search", path: "/search" },
     { icon: GitPullRequest, label: "Contribute", path: "/contribute" },
     { icon: Settings, label: "Settings", path: "/settings" },

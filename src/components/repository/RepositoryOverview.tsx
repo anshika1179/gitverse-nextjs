@@ -1,3 +1,5 @@
+"use client";
+
 import {
   GitBranch,
   Star,
@@ -18,6 +20,9 @@ import {
   CardDescription,
   CardContent,
 } from "@/components/ui";
+import { Button } from "@/components/ui";
+import { useState } from "react";
+import { buildApiUrl } from "@/services/apiConfig";
 
 interface RepositoryData {
   id: string;
@@ -44,11 +49,19 @@ interface RepositoryOverviewProps {
 export const RepositoryOverview = ({
   repositoryData,
 }: RepositoryOverviewProps) => {
+  const [readmeText, setReadmeText] = useState<string | null>(
+    repositoryData?.readmeText ?? null,
+  );
+  const [readmePath, setReadmePath] = useState<string | null>(
+    repositoryData?.readmePath ?? null,
+  );
+  const [isFetchingReadme, setIsFetchingReadme] = useState(false);
+
   // Calculate total lines of code from languages only
   const totalLines =
     repositoryData?.languages?.reduce(
       (sum: number, lang: any) => sum + (lang.lines || 0),
-      0
+      0,
     ) || 0;
 
   // Use real repository data
@@ -80,7 +93,7 @@ export const RepositoryOverview = ({
       label: "Total Commits",
       value: repositoryData?.commits?.length?.toString() || "0",
       icon: Activity,
-      trend: `${repositoryData?.branches?.length || 0} branches`,
+      trend: `Default: ${repositoryData?.defaultBranch || "main"}`,
     },
     {
       label: "Contributors",
@@ -128,11 +141,43 @@ export const RepositoryOverview = ({
     color: getLanguageColor(lang.name),
   }));
 
+  const fetchReadme = async () => {
+    if (!repositoryData?.id) return;
+    setIsFetchingReadme(true);
+    try {
+      const token =
+        typeof window !== "undefined"
+          ? localStorage.getItem("gitverse_token")
+          : null;
+
+      const res = await fetch(
+        buildApiUrl(`/api/repositories/${repositoryData.id}/readme`),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        },
+      );
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to fetch README");
+      }
+
+      setReadmeText(data?.repository?.readmeText ?? null);
+      setReadmePath(data?.repository?.readmePath ?? null);
+    } finally {
+      setIsFetchingReadme(false);
+    }
+  };
+
   const formatTimeAgo = (timestamp: string) => {
     const date = new Date(timestamp);
     const now = new Date();
     const diffInHours = Math.floor(
-      (now.getTime() - date.getTime()) / (1000 * 60 * 60)
+      (now.getTime() - date.getTime()) / (1000 * 60 * 60),
     );
 
     if (diffInHours < 1) return "Just now";
@@ -329,6 +374,47 @@ export const RepositoryOverview = ({
                   </div>
                 </div>
               ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* README */}
+      <div className="grid grid-cols-1 gap-4 sm:gap-6">
+        <Card className="glass">
+          <CardHeader className="p-4 sm:p-6">
+            <CardTitle className="font-heading text-lg sm:text-xl">
+              README
+            </CardTitle>
+            <CardDescription className="text-xs sm:text-sm">
+              {readmePath
+                ? `Showing ${readmePath}`
+                : "Fetch and view the repository README"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0 space-y-3">
+            {readmeText ? (
+              <pre className="whitespace-pre-wrap text-xs sm:text-sm leading-relaxed bg-background/50 border border-border/50 rounded-lg p-3 max-h-96 overflow-auto">
+                {readmeText}
+              </pre>
+            ) : (
+              <div className="text-sm text-muted-foreground">
+                No README stored yet.
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                onClick={fetchReadme}
+                disabled={isFetchingReadme}
+                className="bg-gradient-primary"
+              >
+                {isFetchingReadme ? "Fetching…" : "Fetch README"}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Stored in DB for faster reuse.
+              </span>
             </div>
           </CardContent>
         </Card>

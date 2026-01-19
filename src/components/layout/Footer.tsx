@@ -18,8 +18,7 @@ export const Footer: React.FC = () => {
               </span>
             </Link>
             <p className="text-sm">
-              Transform Git repositories into interactive visual knowledge graphs with AI-powered
-              insights.
+              Contribution made easy with repo visualization and PR Mentor.
             </p>
           </div>
 
@@ -107,7 +106,7 @@ export const Footer: React.FC = () => {
 
         {/* Bottom Section */}
         <div className="mt-12 pt-8 border-t border-border/50 flex flex-col md:flex-row justify-between items-center">
-          <p className="text-sm">© 2025 GitVerse. All rights reserved.</p>
+          <p className="text-sm">© 2026 GitVerse. All rights reserved.</p>
           <div className="flex space-x-6 mt-4 md:mt-0">
             <a
               href="https://twitter.com"

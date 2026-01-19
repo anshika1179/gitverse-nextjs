@@ -26,7 +26,14 @@ export async function GET(request: NextRequest) {
   const setupAction = (url.searchParams.get("setup_action") || "").trim();
   const state = (url.searchParams.get("state") || "").trim();
 
-  const redirectUrl = new URL("/contribute", getPublicOrigin(request));
+  // Cloud Run may expose multiple *.run.app hostnames for the same service.
+  // Our UI stores auth in localStorage, so switching origins loses the token.
+  // Prefer a single canonical origin for post-install redirect.
+  const canonicalOrigin = (process.env.NEXTAUTH_URL || "").trim();
+  const redirectUrl = new URL(
+    "/contribute",
+    canonicalOrigin || getPublicOrigin(request),
+  );
 
   if (!installationIdRaw || !Number.isFinite(Number(installationIdRaw))) {
     redirectUrl.searchParams.set("install", "error");

@@ -85,6 +85,7 @@ load_dotenv() {
   # - Does not override already-set environment variables
   local multiline_key=""
   local multiline_value=""
+  local multiline_quote=""
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     local line_raw="$line"
@@ -101,15 +102,26 @@ load_dotenv() {
         if [[ "$line_raw" == "-----END "* ]]; then
           multiline_key=""
           multiline_value=""
+          multiline_quote=""
         fi
         continue
       fi
 
-      multiline_value+=$'\n'"$line_raw"
+      local line_to_add="$line_raw"
+      if [[ -n "$multiline_quote" && "$line_raw" == "-----END "* ]]; then
+        # Common pattern: the closing quote is appended to the END line.
+        local last_char="${line_to_add: -1}"
+        if [[ "$last_char" == "$multiline_quote" ]]; then
+          line_to_add="${line_to_add:0:${#line_to_add}-1}"
+        fi
+      fi
+
+      multiline_value+=$'\n'"$line_to_add"
       if [[ "$line_raw" == "-----END "* ]]; then
         export "$multiline_key=$multiline_value"
         multiline_key=""
         multiline_value=""
+        multiline_quote=""
       fi
       continue
     fi
@@ -150,13 +162,26 @@ load_dotenv() {
 
     # Support multi-line PEM keys in .env (common when copy/pasting GitHub App private keys).
     # We capture until the END marker and then export the full value (with newlines).
-    if [[ "$key" == "GITHUB_APP_PRIVATE_KEY" && "$value" == "-----BEGIN "* && "$value" != *"-----END "* ]]; then
+    # Accept an optional opening quote before the BEGIN line.
+    local value_for_check="$value"
+    local quote_for_check=""
+    if [[ "$value_for_check" == '"'* ]]; then
+      quote_for_check='"'
+      value_for_check="${value_for_check#\"}"
+    elif [[ "$value_for_check" == "'"* ]]; then
+      quote_for_check="'"
+      value_for_check="${value_for_check#\'}"
+    fi
+
+    if [[ "$key" == "GITHUB_APP_PRIVATE_KEY" && "$value_for_check" == "-----BEGIN "* && "$value_for_check" != *"-----END "* ]]; then
       if [[ -z "${!key:-}" ]]; then
         multiline_key="$key"
-        multiline_value="$value"
+        multiline_quote="$quote_for_check"
+        multiline_value="$value_for_check"
       else
         multiline_key="__SKIP__"
         multiline_value=""
+        multiline_quote=""
       fi
       continue
     fi
@@ -399,10 +424,12 @@ gcloud run deploy "$SERVICE_WEB" \
 WEB_URL="$(gcloud run services describe "$SERVICE_WEB" --region "$REGION" --format='value(status.url)')"
 
 # Cloud Run can expose multiple URLs for a service (see annotation run.googleapis.com/urls).
-# Prefer the regional *.run.app URL if available so NEXTAUTH_URL is stable and matches OAuth setup.
-WEB_URL_REGIONAL="$(gcloud run services describe "$SERVICE_WEB" --region "$REGION" --format='value(metadata.annotations."run.googleapis.com/urls")' 2>/dev/null | tr -d '[]"' | tr ',' '\n' | sed -n 's/^\(https:\/\/[^ ]*\.run\.app\).*$/\1/p' | head -n 1)"
-if [[ -n "$WEB_URL_REGIONAL" ]]; then
-  WEB_URL="$WEB_URL_REGIONAL"
+# Prefer the regional *project-number* URL (e.g. https://service-1234567890.region.run.app) so
+# NEXTAUTH_URL is stable and consistent with OAuth / GitHub App setup URLs.
+WEB_URLS_RAW="$(gcloud run services describe "$SERVICE_WEB" --region "$REGION" --format='value(metadata.annotations."run.googleapis.com/urls")' 2>/dev/null || true)"
+WEB_URL_PREFERRED="$(printf '%s' "$WEB_URLS_RAW" | tr -d '[]"' | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -E "^https://.+-[0-9]+\\.${REGION}\\.run\\.app$" | head -n 1)"
+if [[ -n "$WEB_URL_PREFERRED" ]]; then
+  WEB_URL="$WEB_URL_PREFERRED"
 fi
 
 # If we started with a placeholder (or accidentally used localhost from a dev .env),

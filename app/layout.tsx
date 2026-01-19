@@ -8,7 +8,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "GitVerse - AI-Powered Repository Analysis",
-  description: "Analyze your repositories with AI-powered insights",
+  description: "Contribution made easy with repo visualization and PR Mentor",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

@@ -9,16 +9,15 @@ import { RepositoryOverview } from "@/components/repository/RepositoryOverview";
 import { FileStructure } from "@/components/repository/FileStructure";
 import { CommitHistory } from "@/components/repository/CommitHistory";
 import { Contributors } from "@/components/repository/Contributors";
-import { BranchVisualization } from "@/components/repository/BranchVisualization";
 import { RepositoryInsights } from "@/components/repository/RepositoryInsights";
-import { AIRepositoryOverlay } from "@/components/ai/AIRepositoryOverlay";
+import { RepositoryMentorTab } from "@/components/ai/RepositoryMentorTab";
 import {
   Home,
   FolderTree,
   GitCommit,
   Users,
+  Sparkles,
   BarChart3,
-  GitBranch,
   ArrowLeft,
   Trash2,
 } from "lucide-react";
@@ -33,7 +32,7 @@ type TabType =
   | "files"
   | "commits"
   | "contributors"
-  | "branches"
+  | "mentor"
   | "insights";
 
 interface Tab {
@@ -52,9 +51,9 @@ const tabs: Tab[] = [
     icon: <Users className="h-4 w-4" />,
   },
   {
-    id: "branches",
-    label: "Branches",
-    icon: <GitBranch className="h-4 w-4" />,
+    id: "mentor",
+    label: "AI Mentor",
+    icon: <Sparkles className="h-4 w-4" />,
   },
   {
     id: "insights",
@@ -147,7 +146,7 @@ export default function RepositoryAnalysis() {
         buildApiUrl(`/api/analysis-jobs/${jobId}`),
         {
           headers: { Authorization: `Bearer ${token}` },
-        }
+        },
       );
 
       const nextJob = response.data.job || response.data;
@@ -200,44 +199,6 @@ export default function RepositoryAnalysis() {
     }
   };
 
-  // Repository data for AI context
-  const repositoryData = repository
-    ? {
-        name: repository.name,
-        description: repository.description || "",
-        languages: repository.languages || [],
-        stats: {
-          commits: Array.isArray(repository.commits)
-            ? repository.commits.length
-            : repository.commits || 0,
-          contributors: Array.isArray(repository.contributors)
-            ? repository.contributors.length
-            : 0,
-          files: Array.isArray(repository.files)
-            ? repository.files.length
-            : repository.files || 0,
-          branches: Array.isArray(repository.branches)
-            ? repository.branches.length
-            : repository.branches || 0,
-          lines: Array.isArray(repository.languages)
-            ? repository.languages.reduce(
-                (sum: number, lang: any) => sum + (lang.lines || 0),
-                0
-              )
-            : 0,
-          stars: repository.stars || 0,
-          forks: repository.forks || 0,
-        },
-        recentCommits: Array.isArray(repository.commits)
-          ? repository.commits.slice(0, 10)
-          : [],
-        contributors: Array.isArray(repository.contributors)
-          ? repository.contributors
-          : [],
-        branches: Array.isArray(repository.branches) ? repository.branches : [],
-      }
-    : null;
-
   const renderContent = () => {
     switch (activeTab) {
       case "overview":
@@ -248,8 +209,8 @@ export default function RepositoryAnalysis() {
         return <CommitHistory repository={repository} />;
       case "contributors":
         return <Contributors repository={repository} />;
-      case "branches":
-        return <BranchVisualization repository={repository} />;
+      case "mentor":
+        return <RepositoryMentorTab repositoryData={repository} />;
       case "insights":
         return <RepositoryInsights repository={repository} />;
       default:
@@ -329,10 +290,6 @@ export default function RepositoryAnalysis() {
                 </div>
                 <div className="flex justify-center gap-4 text-sm text-muted-foreground">
                   <div className="flex items-center gap-2">
-                    <GitBranch className="h-4 w-4" />
-                    Analyzing branches
-                  </div>
-                  <div className="flex items-center gap-2">
                     <GitCommit className="h-4 w-4" />
                     Processing commits
                   </div>
@@ -369,11 +326,6 @@ export default function RepositoryAnalysis() {
 
                 {/* Content */}
                 <div className="animate-fade-in-up">{renderContent()}</div>
-
-                {/* AI Repository Assistant Overlay */}
-                {repositoryData && (
-                  <AIRepositoryOverlay repository={repositoryData} />
-                )}
               </>
             )}
           </>

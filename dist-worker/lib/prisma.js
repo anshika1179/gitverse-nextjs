@@ -47,8 +47,9 @@ function createPrismaClient() {
         return new client_1.PrismaClient({ adapter, log: ["error", "warn"] });
     }
     const poolMaxRaw = process.env.PG_POOL_MAX;
-    const poolMax = poolMaxRaw ? Number(poolMaxRaw) : 2;
-    const normalizedPoolMax = Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 2;
+    const defaultPoolMax = process.env.NODE_ENV === "production" ? 2 : 1;
+    const poolMax = poolMaxRaw ? Number(poolMaxRaw) : defaultPoolMax;
+    const normalizedPoolMax = Number.isFinite(poolMax) && poolMax > 0 ? poolMax : defaultPoolMax;
     const connectionTimeoutMsRaw = process.env.PG_POOL_CONNECTION_TIMEOUT_MS;
     const connectionTimeoutMs = connectionTimeoutMsRaw
         ? Number(connectionTimeoutMsRaw)
@@ -59,7 +60,7 @@ function createPrismaClient() {
     const pool = new pg_1.Pool({
         connectionString,
         connectionTimeoutMillis: normalizedConnectionTimeoutMs,
-        idleTimeoutMillis: 30000,
+        idleTimeoutMillis: process.env.NODE_ENV === "production" ? 30000 : 10000,
         max: normalizedPoolMax,
         min: 0,
     });

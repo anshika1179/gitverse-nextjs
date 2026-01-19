@@ -8,8 +8,10 @@
   "scripts": {
     "dev": "NODE_OPTIONS=\"--dns-result-order=ipv4first --no-network-family-autoselection\" next dev",
     "build": "prisma generate && next build",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "prisma generate && rm -f tsconfig.tsbuildinfo && tsc -p tsconfig.json --noEmit",
     "build:worker": "tsc -p tsconfig.worker.json",
+    "preworker": "node -e \"const fs=require('fs'); const cp=require('child_process'); if(fs.existsSync('node_modules/.bin/tsc')){cp.execSync('npm run -s build:worker',{stdio:'inherit'});} else {console.log('Skipping build:worker (tsc not installed)');}\"",
+    "preworker:server": "node -e \"const fs=require('fs'); const cp=require('child_process'); if(fs.existsSync('node_modules/.bin/tsc')){cp.execSync('npm run -s build:worker',{stdio:'inherit'});} else {console.log('Skipping build:worker (tsc not installed)');}\"",
     "start": "NODE_OPTIONS=\"--dns-result-order=ipv4first --no-network-family-autoselection\" next start -p $PORT",
     "worker": "NODE_OPTIONS=\"--dns-result-order=ipv4first --no-network-family-autoselection\" node dist-worker/scripts/analysisWorker.js",
     "worker:server": "NODE_OPTIONS=\"--dns-result-order=ipv4first --no-network-family-autoselection\" node dist-worker/scripts/workerServer.js",

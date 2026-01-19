@@ -3,6 +3,7 @@ import { GitService } from "./gitService";
 import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
+import * as fs from "fs/promises";
 
 export interface AnalyzeRepositoryInput {
   name: string;
@@ -18,10 +19,103 @@ export type RepositoryAnalysisProgress = {
 };
 
 export type RepositoryAnalysisProgressReporter = (
-  update: RepositoryAnalysisProgress
+  update: RepositoryAnalysisProgress,
 ) => void | Promise<void>;
 
 export class RepositoryService {
+  private async tryReadmeFromRepoPath(repoPath: string): Promise<{
+    path: string;
+    text: string;
+  } | null> {
+    const candidates = [
+      "readme.md",
+      "readme.markdown",
+      "readme.mdx",
+      "readme.txt",
+      "readme.rst",
+      "readme",
+    ];
+
+    try {
+      const entries = await fs.readdir(repoPath, { withFileTypes: true });
+      const fileNames = entries
+        .filter((e) => e.isFile())
+        .map((e) => e.name)
+        .filter(Boolean);
+
+      const byLower = new Map(fileNames.map((n) => [n.toLowerCase(), n]));
+
+      for (const lower of candidates) {
+        const actual = byLower.get(lower);
+        if (!actual) continue;
+
+        const fullPath = path.join(repoPath, actual);
+        const content = await fs.readFile(fullPath, "utf8");
+        const trimmed = content.trim();
+        if (!trimmed) return null;
+
+        // Prevent huge README payloads from bloating DB / responses.
+        const maxChars = 200_000;
+        const safeText =
+          trimmed.length > maxChars ? trimmed.slice(0, maxChars) : trimmed;
+
+        return { path: actual, text: safeText };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async fetchAndStoreReadme(repositoryId: number, userId: number) {
+    const repository = await prisma.repository.findFirst({
+      where: { id: repositoryId, userId },
+      select: { id: true, url: true },
+    });
+
+    if (!repository) {
+      throw new Error("Repository not found");
+    }
+
+    const tempDir = path.join(
+      os.tmpdir(),
+      "gitverse",
+      `readme-${repositoryId}-${crypto.randomBytes(8).toString("hex")}`,
+    );
+
+    let gitService: GitService | null = null;
+
+    try {
+      // For README we don't need all branches; keep it lightweight.
+      gitService = await GitService.cloneRepository(repository.url, tempDir, {
+        depth: 1,
+        noSingleBranch: false,
+      });
+
+      const readme = await this.tryReadmeFromRepoPath(tempDir);
+
+      const updated = await prisma.repository.update({
+        where: { id: repositoryId },
+        data: {
+          readmePath: readme?.path ?? "README.md",
+          readmeText: readme?.text ?? "doesnt exist",
+          readmeFetchedAt: new Date(),
+        },
+      });
+
+      return updated;
+    } finally {
+      if (gitService) {
+        await gitService.cleanup();
+      } else {
+        await fs
+          .rm(tempDir, { recursive: true, force: true })
+          .catch(() => null);
+      }
+    }
+  }
+
   /**
    * Create a new repository record or return existing one
    */
@@ -58,7 +152,7 @@ export class RepositoryService {
    */
   async analyzeRepository(
     repositoryId: number,
-    opts?: { onProgress?: RepositoryAnalysisProgressReporter }
+    opts?: { onProgress?: RepositoryAnalysisProgressReporter },
   ) {
     const repository = await prisma.repository.findUnique({
       where: { id: repositoryId },
@@ -89,7 +183,7 @@ export class RepositoryService {
     const tempDir = path.join(
       os.tmpdir(),
       "gitverse",
-      `repo-${repositoryId}-${crypto.randomBytes(8).toString("hex")}`
+      `repo-${repositoryId}-${crypto.randomBytes(8).toString("hex")}`,
     );
 
     let gitService: GitService | null = null;
@@ -102,6 +196,18 @@ export class RepositoryService {
         progressMessage: "Cloning repository",
       });
       gitService = await GitService.cloneRepository(repository.url, tempDir);
+
+      // Capture README early (best-effort)
+      await report({ progressPercent: 8, progressMessage: "Reading README" });
+      const readme = await this.tryReadmeFromRepoPath(tempDir);
+      await prisma.repository.update({
+        where: { id: repositoryId },
+        data: {
+          readmePath: readme?.path ?? "README.md",
+          readmeText: readme?.text ?? "doesnt exist",
+          readmeFetchedAt: new Date(),
+        },
+      });
 
       // Get repository size
       await report({
@@ -157,11 +263,11 @@ export class RepositoryService {
 
       // Filter out commits that already exist
       const newCommits = commits.filter(
-        (commit) => !existingHashes.has(commit.hash)
+        (commit) => !existingHashes.has(commit.hash),
       );
 
       console.log(
-        `Found ${commits.length} commits, ${newCommits.length} are new, ${existingCommits.length} already exist`
+        `Found ${commits.length} commits, ${newCommits.length} are new, ${existingCommits.length} already exist`,
       );
 
       let insertedCount = 0;
@@ -221,14 +327,14 @@ export class RepositoryService {
           failedCount++;
           console.error(
             `Failed to insert commit ${commit.hash}:`,
-            error.message
+            error.message,
           );
           // Continue with next commit
         }
       }
 
       console.log(
-        `Commit insertion complete: ${insertedCount} inserted, ${failedCount} failed`
+        `Commit insertion complete: ${insertedCount} inserted, ${failedCount} failed`,
       );
 
       // Analyze files
@@ -263,7 +369,7 @@ export class RepositoryService {
           });
         }
         console.log(
-          `File scan complete: processed ${files.length} paths for repository ${repositoryId}`
+          `File scan complete: processed ${files.length} paths for repository ${repositoryId}`,
         );
       } else {
         console.log(`No files found for repository ${repositoryId}`);
@@ -278,7 +384,7 @@ export class RepositoryService {
       const contributors = await gitService.getContributors();
       const totalContributions = contributors.reduce(
         (sum, c) => sum + c.commits,
-        0
+        0,
       );
 
       if (contributors.length > 0) {
@@ -317,21 +423,21 @@ export class RepositoryService {
 
       // Filter out ignored languages
       const filteredLanguages = languages.filter(
-        (lang) => !ignoredLanguages.includes(lang.name)
+        (lang) => !ignoredLanguages.includes(lang.name),
       );
 
       // Recalculate percentages based on remaining languages only
       const totalBytes = filteredLanguages.reduce(
         (sum, lang) => sum + lang.bytes,
-        0
+        0,
       );
       const rawPercentages = filteredLanguages.map((lang) =>
-        totalBytes > 0 ? (lang.bytes / totalBytes) * 100 : 0
+        totalBytes > 0 ? (lang.bytes / totalBytes) * 100 : 0,
       );
 
       // Round to 2 decimal places
       const roundedPercentages = rawPercentages.map(
-        (p) => Math.round(p * 100) / 100
+        (p) => Math.round(p * 100) / 100,
       );
 
       // Adjust to ensure sum is exactly 100%
@@ -340,7 +446,7 @@ export class RepositoryService {
         const diff = 100 - sum;
         // Add difference to the largest percentage
         const maxIndex = roundedPercentages.indexOf(
-          Math.max(...roundedPercentages)
+          Math.max(...roundedPercentages),
         );
         roundedPercentages[maxIndex] =
           Math.round((roundedPercentages[maxIndex] + diff) * 100) / 100;
@@ -350,7 +456,7 @@ export class RepositoryService {
         (lang, index) => ({
           ...lang,
           percentage: roundedPercentages[index],
-        })
+        }),
       );
 
       if (languagesWithAdjustedPercentage.length > 0) {

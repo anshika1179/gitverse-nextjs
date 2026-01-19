@@ -158,6 +158,9 @@ model Repository {
   name           String
   url            String
   description    String?
+  readmePath     String?       @map("readme_path")
+  readmeText     String?       @map("readme_text") @db.Text
+  readmeFetchedAt DateTime?    @map("readme_fetched_at")
   defaultBranch  String        @default("main") @map("default_branch")
   isPrivate      Boolean       @default(false) @map("is_private")
   stars          Int           @default(0)

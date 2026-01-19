@@ -42,7 +42,118 @@ const gitService_1 = require("./gitService");
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const crypto = __importStar(require("crypto"));
+const fs = __importStar(require("fs/promises"));
 class RepositoryService {
+    async tryReadmeFromRepoPath(repoPath) {
+        const candidates = [
+            "readme.md",
+            "readme.markdown",
+            "readme.mdx",
+            "readme.txt",
+            "readme.rst",
+            "readme",
+        ];
+        try {
+            const entries = await fs.readdir(repoPath, { withFileTypes: true });
+            const fileNames = entries
+                .filter((e) => e.isFile())
+                .map((e) => e.name)
+                .filter(Boolean);
+            const byLower = new Map(fileNames.map((n) => [n.toLowerCase(), n]));
+            for (const lower of candidates) {
+                const actual = byLower.get(lower);
+                if (!actual)
+                    continue;
+                const fullPath = path.join(repoPath, actual);
+                const content = await fs.readFile(fullPath, "utf8");
+                const trimmed = content.trim();
+                if (!trimmed)
+                    return null;
+                // Prevent huge README payloads from bloating DB / responses.
+                const maxChars = 200_000;
+                const safeText = trimmed.length > maxChars ? trimmed.slice(0, maxChars) : trimmed;
+                return { path: actual, text: safeText };
+            }
+            return null;
+        }
+        catch {
+            return null;
+        }
+    }
+    async tryReadmeFromGit(gitService) {
+        const candidates = [
+            "readme.md",
+            "readme.markdown",
+            "readme.mdx",
+            "readme.txt",
+            "readme.rst",
+            "readme",
+        ];
+        const scanDirs = ["", "docs", ".github"];
+        for (const dir of scanDirs) {
+            const names = await gitService.listTreeNames(dir || undefined);
+            if (!names.length)
+                continue;
+            const byLower = new Map(names.map((n) => [n.toLowerCase(), n]));
+            for (const lower of candidates) {
+                const actual = byLower.get(lower);
+                if (!actual)
+                    continue;
+                const relPath = dir ? `${dir}/${actual}` : actual;
+                const content = await gitService.showFileAtHead(relPath);
+                if (!content)
+                    continue;
+                const trimmed = content.trim();
+                if (!trimmed)
+                    continue;
+                const maxChars = 200_000;
+                const safeText = trimmed.length > maxChars ? trimmed.slice(0, maxChars) : trimmed;
+                return { path: relPath, text: safeText };
+            }
+        }
+        return null;
+    }
+    async fetchAndStoreReadme(repositoryId, userId) {
+        const repository = await prisma_1.default.repository.findFirst({
+            where: { id: repositoryId, userId },
+            select: { id: true, url: true },
+        });
+        if (!repository) {
+            throw new Error("Repository not found");
+        }
+        const tempDir = path.join(os.tmpdir(), "gitverse", `readme-${repositoryId}-${crypto.randomBytes(8).toString("hex")}`);
+        let gitService = null;
+        try {
+            // For README we don't need all branches; keep it lightweight.
+            gitService = await gitService_1.GitService.cloneRepository(repository.url, tempDir, {
+                depth: 1,
+                noSingleBranch: false,
+            });
+            let readme = await this.tryReadmeFromRepoPath(tempDir);
+            if (!readme) {
+                readme = await this.tryReadmeFromGit(gitService);
+            }
+            const updated = await prisma_1.default.repository.update({
+                where: { id: repositoryId },
+                data: {
+                    readmePath: readme?.path ?? "README.md",
+                    readmeText: readme?.text ?? "doesnt exist",
+                    readmeFetchedAt: new Date(),
+                },
+            });
+            return updated;
+        }
+        finally {
+            if (gitService) {
+                await gitService.cleanup();
+            }
+            else {
+                await fs
+                    .rm(tempDir, { recursive: true, force: true })
+                    .catch(() => null);
+            }
+        }
+    }
     /**
      * Create a new repository record or return existing one
      */
@@ -106,6 +217,28 @@ class RepositoryService {
                 progressMessage: "Cloning repository",
             });
             gitService = await gitService_1.GitService.cloneRepository(repository.url, tempDir);
+            // Capture README early (best-effort)
+            await report({ progressPercent: 8, progressMessage: "Reading README" });
+            let readme = await this.tryReadmeFromRepoPath(tempDir);
+            if (!readme) {
+                readme = await this.tryReadmeFromGit(gitService);
+            }
+            console.log(`README capture for repo ${repositoryId}: ${readme ? "found" : "missing"}${readme?.path ? ` (${readme.path})` : ""}`);
+            await report({
+                progressDetails: {
+                    readmeFound: Boolean(readme),
+                    readmePath: readme?.path ?? null,
+                    readmeChars: readme?.text?.length ?? 0,
+                },
+            });
+            await prisma_1.default.repository.update({
+                where: { id: repositoryId },
+                data: {
+                    readmePath: readme?.path ?? "README.md",
+                    readmeText: readme?.text ?? "doesnt exist",
+                    readmeFetchedAt: new Date(),
+                },
+            });
             // Get repository size
             await report({
                 progressPercent: 10,
