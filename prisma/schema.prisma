@@ -179,6 +179,8 @@ model Repository {
   languages      Language[]
   analysisJobs   AnalysisJob[]
 
+  @@index([userId])
+  @@index([userId, url])
   @@map("repositories")
 }
 
@@ -217,6 +219,7 @@ model AnalysisJob {
   @@index([lockExpiresAt])
   @@index([repositoryId])
   @@index([userId])
+  @@index([repositoryId, userId, createdAt])
   @@map("analysis_jobs")
 }
 
