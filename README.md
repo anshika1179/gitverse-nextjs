@@ -291,6 +291,7 @@ cp .env.example .env.local
 | `DATABASE_URL` | PostgreSQL connection string (with SSL) | Create a free database on [Neon](https://neon.tech) → **Connection Details** → copy the connection string. Append `?sslmode=require&schema=public` if not already present. |
 | `JWT_SECRET` | Secret used to sign custom JWT tokens | Generate with `openssl rand -base64 32` or any random string ≥ 32 characters. |
 | `GEMINI_API_KEY` | Google Gemini API key for AI features | Go to [Google AI Studio](https://aistudio.google.com/app/apikey) → **Create API key**. |
+| `ANALYSIS_RUNNER_SECRET` | Secret to authorize the internal cron job runner endpoint in production | Generate with `openssl rand -base64 32`. Must be passed via `Authorization: Bearer <SECRET>` for cron triggering. |
 
 ### OAuth / NextAuth Variables
 
@@ -388,6 +389,14 @@ On Vercel, add it under **Settings → Environment Variables**.
 1. Confirm `GEMINI_API_KEY` is set in `.env.local`.
 2. Verify the key is active in [Google AI Studio](https://aistudio.google.com/app/apikey).
 3. Check that the Gemini API is enabled for your Google Cloud project.
+
+### Internal Analysis Runner returning `500` or `401`
+
+**Cause:** The `ANALYSIS_RUNNER_SECRET` environment variable is missing in production or an incorrect authorization header was provided.
+
+**Fix:**
+1. Generate a strong random string (e.g., `openssl rand -base64 32`) and set it as `ANALYSIS_RUNNER_SECRET` in your deployment dashboard (e.g. Vercel).
+2. Configure your cron provider (like Vercel Cron or GitHub Actions) to send an `Authorization: Bearer <YOUR_SECRET>` HTTP header when triggering the `/api/internal/run-analysis` endpoint. In local development, the runner will execute without the secret, but in production, the authorization header is strictly enforced via a timing-safe validation.
 
 ### Environment variables not picked up after editing `.env.local`
 
