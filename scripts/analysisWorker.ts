@@ -138,7 +138,8 @@ async function runJob(
 
 export interface JobOutcome {
   jobId: string;
-  status: "processed" | "failed";
+  status: "processed" | "failed" | "errored";
+  error?: string;
 }
 
 export interface AnalysisWorkerSummary {
@@ -146,11 +147,11 @@ export interface AnalysisWorkerSummary {
   jobsProcessed: number;
   jobsSkipped: number;
   jobsFailed: number;
+  jobsErrored: number;
   executionDurationMs: number;
   earlyStopReason?: string;
   success: boolean;
-  budgetExhausted?: boolean;
-  earlyStopReason?: string;
+  jobOutcomes: JobOutcome[];
 }
 
 export async function startAnalysisWorkerLoop(opts?: {
@@ -171,6 +172,7 @@ export async function startAnalysisWorkerLoop(opts?: {
 
   let stopping = false;
   const startTimeMs = Date.now();
+  const deadline = opts?.timeBudgetMs ? Date.now() + opts.timeBudgetMs : Infinity;
   let totalJobsScanned = 0;
   let jobsProcessed = 0;
   let jobsSkipped = 0;
@@ -253,22 +255,25 @@ export async function startAnalysisWorkerLoop(opts?: {
           jobsProcessed,
           jobsSkipped,
           jobsFailed,
+          jobsErrored,
           executionDurationMs: Date.now() - startTimeMs,
           earlyStopReason: "errorOut",
           success: false,
-          budgetExhausted,
-          earlyStopReason,
+          jobOutcomes,
         };
       }
       await sleep(pollIntervalMs);
     }
   }
 
+  const success = jobsFailed === 0 && jobsErrored === 0;
+
   return {
     totalJobsScanned,
     jobsProcessed,
     jobsSkipped,
     jobsFailed,
+    jobsErrored,
     executionDurationMs: Date.now() - startTimeMs,
     earlyStopReason,
     success: true,
@@ -282,7 +287,12 @@ const isMain =
   typeof require !== "undefined" && (require as any).main === module;
 if (isMain) {
   const once = !!process.env.WORKER_ONCE;
-  startAnalysisWorkerLoop({ once }).catch((e) => {
+  const budgetEnv = process.env.WORKER_TIME_BUDGET_MS;
+  const timeBudgetMs = budgetEnv ? parseInt(budgetEnv, 10) : undefined;
+  startAnalysisWorkerLoop({
+    ...(once ? { once } : {}),
+    ...(timeBudgetMs && !Number.isNaN(timeBudgetMs) ? { timeBudgetMs } : {}),
+  }).catch((e) => {
     console.error("worker fatal:", e);
     process.exit(1);
   });

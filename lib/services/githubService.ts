@@ -726,20 +726,25 @@ export class GitHubService {
   /**
    * Parse GitHub URL to extract owner and repo
    */
-  static parseGitHubUrl(url: string): { owner: string; repo: string } | null {
-    const patterns = [
-      /github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?$/,
-      /github\.com\/([^\/]+)\/([^\/]+)/,
-    ];
+  static parseGitHubUrl(urlStr: string): { owner: string; repo: string } | null {
+    try {
+      // Allow bare github.com URLs by implicitly adding https://
+      const urlWithProto = urlStr.startsWith('http') ? urlStr : `https://${urlStr}`;
+      const url = new URL(urlWithProto);
 
-    for (const pattern of patterns) {
-      const match = url.match(pattern);
-      if (match) {
+      if (url.hostname !== 'github.com' && url.hostname !== 'www.github.com') {
+        return null;
+      }
+
+      const parts = url.pathname.split('/').filter(Boolean);
+      if (parts.length >= 2) {
         return {
-          owner: match[1],
-          repo: match[2].replace(/\.git$/, ""),
+          owner: parts[0],
+          repo: parts[1].replace(/\.git$/, ''),
         };
       }
+    } catch (e) {
+      // Ignore URL parsing errors, just return null
     }
 
     return null;

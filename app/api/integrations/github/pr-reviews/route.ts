@@ -72,36 +72,30 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    if (repoFullName && repos.length === 0) {
-      return NextResponse.json(
-        { error: "Repository not found" },
-        { status: 404 },
-      );
-    }
-
     return NextResponse.json(
       { repos: toJsonSafe(repos) },
-      {
+      { 
         status: 200,
-        headers: {
-          "Cache-Control":
-            "no-store, no-cache, must-revalidate, proxy-revalidate",
-        },
-      },
+        headers: { "Cache-Control": "no-store" }
+      }
     );
   } catch (error: any) {
     console.error("GitHub PR reviews error:", error);
     if (isHttpError(error)) {
       return NextResponse.json(
         { error: error.message },
-        { status: error.status },
+        { 
+          status: error.status,
+          headers: { "Cache-Control": "no-store" }
+        },
       );
     }
     return NextResponse.json(
-      {
-        error: "Failed to load PR reviews",
+      { error: "Failed to load PR reviews" },
+      { 
+        status: 500,
+        headers: { "Cache-Control": "no-store" }
       },
-      { status: 500 },
     );
   }
 }

@@ -3,7 +3,10 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import axios from "axios";
+import Link from "next/link";
+
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { RepositoryOverview } from "@/components/repository/RepositoryOverview";
 import { FileStructure } from "@/components/repository/FileStructure";
@@ -11,6 +14,7 @@ import { CommitHistory } from "@/components/repository/CommitHistory";
 import { Contributors } from "@/components/repository/Contributors";
 import { RepositoryInsights } from "@/components/repository/RepositoryInsights";
 import { RepositoryMentorTab } from "@/components/ai/RepositoryMentorTab";
+
 import {
   Home,
   FolderTree,
@@ -27,13 +31,22 @@ import {
   RotateCcw,
   SearchX,
 } from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import axios from "axios";
+
 import { useToast } from "@/hooks/use-toast";
 import { EmptyState } from "@/components/ui";
 import { buildApiUrl } from "@/services/apiConfig";
-import { RepositoryAnalysisSkeleton } from "@/components/ui/RepositoryAnalysisSkeleton";
+// Local fallback skeleton UI (avoids missing import)
+const RepositoryAnalysisSkeleton: React.FC = () => {
+  return (
+    <div className="glass p-6 rounded-lg">
+      <div className="animate-pulse space-y-4">
+        <div className="h-6 w-1/3 bg-muted rounded" />
+        <div className="h-4 w-full bg-muted rounded" />
+        <div className="h-40 w-full bg-muted rounded" />
+      </div>
+    </div>
+  );
+};
 
 // How long before we stop polling and show a "stuck" error (8 minutes)
 const ANALYSIS_TIMEOUT_MS = 8 * 60 * 1000;
@@ -68,16 +81,21 @@ const tabs: Tab[] = [
 export default function RepositoryAnalysis() {
   const params = useParams();
   const id = params?.id as string;
+
   const router = useRouter();
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [repository, setRepository] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isAnalyzing, _setIsAnalyzing] = useState(false);
   const [job, setJob] = useState<any>(null);
+
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // âœ… ERROR STATE (improved usage)
+  const [error, setError] = useState<string | null>(null);
 
   // Timeout / stuck state
   const [analysisTimedOut, setAnalysisTimedOut] = useState(false);
@@ -85,16 +103,11 @@ export default function RepositoryAnalysis() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const pollingStartedAt = useRef<number | null>(null);
-  // Tracks last time progress changed � prevents falsely timing out active jobs
+  // Tracks last time progress changed — prevents falsely timing out active jobs
   const lastProgressAt = useRef<number | null>(null);
   const elapsedTimer = useRef<NodeJS.Timeout | null>(null);
 
   // â”€â”€ Elapsed seconds ticker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Tracks last time progress changed  prevents falsely timing out active jobs
-  const lastProgressAt = useRef<number | null>(null);
-  const elapsedTimer = useRef<NodeJS.Timeout | null>(null);
-
-  //  Elapsed seconds ticker 
   useEffect(() => {
     if (isAnalyzing && !analysisTimedOut) {
       elapsedTimer.current = setInterval(() => {
@@ -113,16 +126,16 @@ export default function RepositoryAnalysis() {
   }, [isAnalyzing, analysisTimedOut]);
 
   // â”€â”€ Initial fetch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //  Initial fetch 
   useEffect(() => {
     fetchRepository();
   }, [id]);
 
   // â”€â”€ Job polling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //  Job polling 
   useEffect(() => {
-    const repoStatus = repository?.status as string | undefined;
-    const jobStatus = job?.status as string | undefined;
+    if (!job || job.status === "DONE" || job.status === "FAILED") return;
+
+    const repoStatus = repository?.status;
+    const jobStatus = job?.status;
 
     const shouldAnalyze =
       repoStatus === "pending" ||
@@ -152,7 +165,6 @@ export default function RepositoryAnalysis() {
       if (stopped) return;
 
       // â”€â”€ Timeout guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-      //  Timeout guard 
       if (
         lastProgressAt.current &&
         Date.now() - lastProgressAt.current > ANALYSIS_TIMEOUT_MS
@@ -184,21 +196,37 @@ export default function RepositoryAnalysis() {
   }, [repository?.status, repository?.latestJob?.id, job?.id, job?.status, analysisTimedOut]);
 
   // â”€â”€ Data fetchers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //  Data fetchers 
   const fetchRepository = async () => {
     if (!id) return;
+
+    setError(null); // âœ… reset error on retry
+
     try {
       const token = localStorage.getItem("gitverse_token");
-      const response = await axios.get(buildApiUrl(`/api/repositories/${id}`), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+
+      const response = await axios.get(
+        buildApiUrl(`/api/repositories/${id}`),
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
       const repo = response.data.repository || response.data;
       setRepository(repo);
       if (response.data.latestJob) {
         setJob(response.data.latestJob);
       }
-    } catch (error) {
-      console.error("Error fetching repository:", error);
+    } catch (error: any) {
+      setError(
+        error?.response?.data?.error ||
+        "Failed to load repository. Check your connection and try again."
+      );
+
+      toast({
+        title: "Error",
+        description: "Failed to load repository data",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -208,6 +236,7 @@ export default function RepositoryAnalysis() {
     if (!jobId) return;
     try {
       const token = localStorage.getItem("gitverse_token");
+
       const response = await axios.get(
         buildApiUrl(`/api/analysis-jobs/${jobId}`),
         { headers: { Authorization: `Bearer ${token}` } }
@@ -234,55 +263,35 @@ export default function RepositoryAnalysis() {
       }
 
       if (nextJob?.status === "FAILED") {
+        const msg = nextJob?.error || "The repository analysis failed.";
+
+        setError(msg);
+
         pollingStartedAt.current = null;
         setIsAnalyzing(false);
         setAnalysisError(nextJob?.error || "The repository analysis failed.");
         toast({
           title: "Analysis failed",
-          description: nextJob?.error || "The repository analysis failed.",
+          description: msg,
           variant: "destructive",
         });
       }
-    } catch (error) {
-      console.error("Error fetching analysis job:", error);
-    }
-  };
-
-  // ── Re-analyze ─────────────────────────────────────────────────────
-  const handleReAnalyze = async () => {
-    if (!id) return;
-    try {
-      const token = localStorage.getItem("gitverse_token");
-      await axios.post(
-        buildApiUrl(`/api/repositories/${id}/analyze`),
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      toast({
-        title: "Analysis started",
-        description: "A new analysis job has been queued.",
-      });
-      pollingStartedAt.current = Date.now();
-      lastProgressAt.current = Date.now();
-      setElapsedSeconds(0);
-      setAnalysisTimedOut(false);
-      setAnalysisError(null);
-      await fetchRepository();
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.response?.data?.error || "Failed to start analysis",
+        description: "Failed to fetch analysis job status",
         variant: "destructive",
       });
     }
   };
 
-  // ── Delete ────────────────────────────────────────────────────────
+  // â”€â”€ Delete â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const handleDeleteRepository = async () => {
     if (!id) return;
     setIsDeleting(true);
     try {
       const token = localStorage.getItem("gitverse_token");
+
       await axios.delete(buildApiUrl(`/api/repositories/${id}`), {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -292,7 +301,6 @@ export default function RepositoryAnalysis() {
       });
       router.push("/dashboard");
     } catch (error: any) {
-      console.error("Error deleting repository:", error);
       toast({
         title: "Error",
         description: error.response?.data?.error || "Failed to delete repository",
@@ -305,36 +313,72 @@ export default function RepositoryAnalysis() {
   };
 
   // â”€â”€ Tab content â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //  Tab content 
   const renderContent = () => {
     switch (activeTab) {
-      case "overview":     return <RepositoryOverview repositoryData={repository} />;
-      case "files":        return <FileStructure repository={repository} />;
-      case "commits":      return <CommitHistory repository={repository} />;
-      case "contributors": return <Contributors repository={repository} />;
-      case "mentor":       return <RepositoryMentorTab repositoryData={repository} />;
-      case "insights":     return <RepositoryInsights repository={repository} />;
-      default:             return <RepositoryOverview />;
+      case "overview":
+        return <RepositoryOverview repositoryData={repository} />;
+      case "files":
+        return <FileStructure repository={repository} />;
+      case "commits":
+        return <CommitHistory repository={repository} />;
+      case "contributors":
+        return <Contributors repository={repository} />;
+      case "mentor":
+        return <RepositoryMentorTab repositoryData={repository} />;
+      case "insights":
+        return <RepositoryInsights repository={repository} />;
+      default:
+        return <RepositoryOverview repositoryData={repository} />;
     }
   };
+const lastAnalyzedDate = repository?.lastAnalyzedAt
+  ? new Date(repository.lastAnalyzedAt)
+  : null;
 
-  // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //  Helpers 
-  const formatElapsed = (secs: number) => {
-    if (secs < 60) return `${secs}s`;
-    return `${Math.floor(secs / 60)}m ${secs % 60}s`;
-  };
-
-  const progressPercent = job?.progressPercent ?? 0;
-  const progressMessage = job?.progressMessage || "Queued";
-
-  // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  //  Render 
+const formattedLastAnalyzed =
+  lastAnalyzedDate && !isNaN(lastAnalyzedDate.getTime())
+    ? new Intl.DateTimeFormat("en-US", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(lastAnalyzedDate)
+    : "Not available";
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {showDeleteDialog && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
+            <div className="glass p-6 rounded-lg max-w-sm mx-4">
+              <h2 className="text-lg font-semibold mb-2">Delete Repository?</h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                This action cannot be undone. The repository and all its data will be permanently deleted.
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowDeleteDialog(false)}
+                  disabled={isDeleting}
+                  className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteRepository}
+                  disabled={isDeleting}
+                  className="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white disabled:opacity-50"
+                >
+                  {isDeleting ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <RepositoryAnalysisSkeleton />
+        ) : error ? (
+          <div className="glass border border-red-500/40 p-4 rounded-lg text-red-300 flex items-start gap-2">
+            <span>⚠️</span>
+            <span>{error}</span>
+          </div>
         ) : !job ? (
           <EmptyState
             icon={Activity}
@@ -345,45 +389,63 @@ export default function RepositoryAnalysis() {
           />
         ) : (
           <>
-            {/* Header */}
+            {/* âœ… IMPROVED ERROR UI */}
+            {error && (
+              <div className="glass border border-red-500/40 p-4 rounded-lg text-red-300 flex items-start gap-2">
+                <span>âš ï¸</span>
+                <span>{error}</span>
+              </div>
+            )}
+
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-              <Link
-                href="/dashboard"
-                className="glass p-2 rounded-lg hover:bg-white/10 transition-all duration-300 self-start"
-              >
-                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
+              <Link href="/dashboard" className="glass p-2 rounded-lg hover:bg-white/10">
+                <ArrowLeft className="h-4 w-4" />
               </Link>
+
               <div className="flex-1 min-w-0">
-                <h1 className="text-2xl sm:text-3xl font-bold truncate">
-                  {repository.name}
+                <h1 className="text-2xl font-bold truncate">
+                  {repository?.name || "Repository"}
                 </h1>
-                <p className="text-xs sm:text-sm text-muted-foreground mt-1 truncate">
-                  {repository.url}
+
+                <p className="text-sm text-muted-foreground truncate">
+                  {repository?.url || "No URL available"}
+                </p>
+
+                <p className="text-xs text-muted-foreground mt-1">
+                  Status:{" "}
+                  <span className="capitalize">
+                    {repository?.status || "unknown"}
+                  </span>
                 </p>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
-                  <p className="text-xs text-muted-foreground">
-                    Status: <span className="capitalize">{repository.status}</span>
-                  </p>
-                  {isAnalyzing && !analysisTimedOut && (
-                    <span className="flex items-center gap-1 text-xs text-primary">
-                      <span className="animate-pulse">â—‰</span>
-                      <span className="animate-pulse"></span>
-                      Analyzing...
-                    </span>
+                <p className="text-xs text-muted-foreground">
+                Status:{" "}
+                <span className="capitalize">{repository.status}</span>
+                </p>
+
+                <p className="text-xs text-muted-foreground">
+                  Last analyzed:{" "}
+                  <span>{formattedLastAnalyzed}</span>
+                </p>
+
+                {isAnalyzing && (
+                <span className="flex items-center gap-1 text-xs text-primary">
+                <span className="animate-pulse">â—</span>
+                Analyzing...
+                </span>
                   )}
-                </div>
+              </div>
               </div>
               <button
                 onClick={() => setShowDeleteDialog(true)}
-                className="glass p-2 rounded-lg hover:bg-red-500/20 transition-all duration-300 text-red-500 hover:text-red-400 flex-shrink-0"
-                title="Delete repository"
+                disabled={isDeleting}
+                className="glass p-2 rounded-lg text-red-500"
               >
-                <Trash2 className="h-4 w-4 sm:h-5 sm:w-5" />
+                <Trash2 className="h-4 w-4" />
               </button>
             </div>
 
             {/* â”€â”€ Analyzing spinner (with timeout awareness) â”€â”€ */}
-            {/*  Analyzing spinner (with timeout awareness)  */}
             {isAnalyzing && !analysisTimedOut ? (
               <div className="glass rounded-lg p-12 text-center space-y-6">
                 <div className="flex justify-center">
@@ -424,7 +486,6 @@ export default function RepositoryAnalysis() {
                         <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />
                         Still queued after {formatElapsed(elapsedSeconds)}. 
                         The worker runs every 5 minutes via GitHub Actions â€” 
-                        The worker runs every 5 minutes via GitHub Actions - 
                         it should pick this up shortly.
                       </p>
                     </div>
@@ -445,7 +506,6 @@ export default function RepositoryAnalysis() {
 
             ) : analysisTimedOut || analysisError ? (
               /* â”€â”€ Timeout / error state â”€â”€ */
-              /*  Timeout / error state  */
               <div className="glass rounded-lg p-12 text-center space-y-6">
                 <div className="flex justify-center">
                   <div className="p-4 rounded-full bg-red-500/10">
@@ -526,7 +586,6 @@ export default function RepositoryAnalysis() {
               </div>
             ) : (
               /* â”€â”€ Done â€” show tabs â”€â”€ */
-              /*  Done - show tabs  */
               <>
                 <div className="glass rounded-lg p-2">
                   <div className="flex gap-2 overflow-x-auto">

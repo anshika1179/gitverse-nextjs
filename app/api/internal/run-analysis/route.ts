@@ -30,41 +30,18 @@ export async function GET(request: Request) {
       maxJobs
     });
 
-    const workerElapsed = Date.now() - workerStart;
-    const totalElapsed = Date.now() - requestStart;
-
-    console.log(
-      `[run-analysis] Worker completed successfully in ${workerElapsed}ms`
-    );
+    console.log(`Finished analysis cron run. Summary:`, metrics);
 
     return NextResponse.json({
-      success: true,
-      message: 'Analysis cron completed successfully',
-      workerElapsedMs: workerElapsed,
-      totalElapsedMs: totalElapsed,
-      timeBudgetMs,
+      success: metrics.success,
+      message: 'Analysis worker execution completed',
+      metrics,
     });
-  } catch (error) {
-    const elapsed = Date.now() - requestStart;
-
-    console.error(
-      '[run-analysis] Cron execution failed',
-      error instanceof Error
-        ? {
-            message: error.message,
-            stack: error.stack,
-            elapsedMs: elapsed,
-          }
-        : error
-    );
-
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'Internal server error',
-        elapsedMs: elapsed,
-      },
-      { status: 500 }
-    );
+  } catch (error: any) {
+    console.error('run-analysis cron error:', error instanceof Error ? error.message : "Unknown error");
+    return NextResponse.json({
+      error: 'Internal server error',
+      success: false,
+    }, { status: 500 });
   }
 }

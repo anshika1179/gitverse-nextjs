@@ -125,6 +125,28 @@ If you are testing specific background workflows locally that mimic a custom non
 npm run worker       # Run background tasks (Legacy / Optional)
 ```
 
+### Analysis Worker & Cron Runner
+
+GitVerse uses a background worker to process repository analysis jobs. The worker is triggered by a cron scheduler and runs one pass through the job queue each time it is called.
+
+**Local development** — trigger a single pass manually:
+
+```bash
+WORKER_ONCE=1 npm run worker:dev
+```
+
+**Production setup** — see the full guide: [docs/cron-setup.md](./docs/cron-setup.md)
+
+Quick summary of deployment options:
+
+| Option | Best for |
+|---|---|
+| Vercel Cron Jobs (`vercel.json`) | Vercel deployments |
+| GitHub Actions (`.github/workflows/run-analysis-cron.yml`) | Any deployment, free tier |
+| Long-running worker server (`npm run worker:server`) | Docker / VPS / Cloud Run |
+
+The cron endpoint is `GET /api/internal/run-analysis` and is protected by `ANALYSIS_RUNNER_SECRET`.
+
 ### Database Management
 
 ```bash
