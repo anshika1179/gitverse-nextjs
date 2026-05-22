@@ -73,9 +73,17 @@ const tabs: Tab[] = [
   { id: "overview", label: "Overview", icon: <Home className="h-4 w-4" /> },
   { id: "files", label: "Files", icon: <FolderTree className="h-4 w-4" /> },
   { id: "commits", label: "Commits", icon: <GitCommit className="h-4 w-4" /> },
-  { id: "contributors", label: "Contributors", icon: <Users className="h-4 w-4" /> },
+  {
+    id: "contributors",
+    label: "Contributors",
+    icon: <Users className="h-4 w-4" />,
+  },
   { id: "mentor", label: "AI Mentor", icon: <Sparkles className="h-4 w-4" /> },
-  { id: "insights", label: "Insights", icon: <BarChart3 className="h-4 w-4" /> },
+  {
+    id: "insights",
+    label: "Insights",
+    icon: <BarChart3 className="h-4 w-4" />,
+  },
 ];
 
 export default function RepositoryAnalysis() {
@@ -113,7 +121,7 @@ export default function RepositoryAnalysis() {
       elapsedTimer.current = setInterval(() => {
         if (pollingStartedAt.current) {
           setElapsedSeconds(
-            Math.floor((Date.now() - pollingStartedAt.current) / 1000)
+            Math.floor((Date.now() - pollingStartedAt.current) / 1000),
           );
         }
       }, 1000);
@@ -174,8 +182,8 @@ export default function RepositoryAnalysis() {
         setIsAnalyzing(false);
         setAnalysisError(
           "Analysis has been queued for over 8 minutes without progress. " +
-          "The background worker may not be running. Please try again later " +
-          "or contact the maintainer."
+            "The background worker may not be running. Please try again later " +
+            "or contact the maintainer.",
         );
         return;
       }
@@ -184,7 +192,10 @@ export default function RepositoryAnalysis() {
       if (stopped) return;
 
       setTimeout(poll, intervalMs);
-      intervalMs = Math.min(POLL_INTERVAL_MAX_MS, intervalMs + POLL_INTERVAL_STEP_MS);
+      intervalMs = Math.min(
+        POLL_INTERVAL_MAX_MS,
+        intervalMs + POLL_INTERVAL_STEP_MS,
+      );
     };
 
     poll();
@@ -192,8 +203,14 @@ export default function RepositoryAnalysis() {
     return () => {
       stopped = true;
     };
-  // analysisTimedOut included so Check Again restarts polling
-  }, [repository?.status, repository?.latestJob?.id, job?.id, job?.status, analysisTimedOut]);
+    // analysisTimedOut included so Check Again restarts polling
+  }, [
+    repository?.status,
+    repository?.latestJob?.id,
+    job?.id,
+    job?.status,
+    analysisTimedOut,
+  ]);
 
   // â”€â”€ Data fetchers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const fetchRepository = async () => {
@@ -239,7 +256,7 @@ export default function RepositoryAnalysis() {
 
       const response = await axios.get(
         buildApiUrl(`/api/analysis-jobs/${jobId}`),
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       const nextJob = response.data.job || response.data;
@@ -303,7 +320,8 @@ export default function RepositoryAnalysis() {
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.response?.data?.error || "Failed to delete repository",
+        description:
+          error.response?.data?.error || "Failed to delete repository",
         variant: "destructive",
       });
     } finally {
@@ -452,9 +470,12 @@ const formattedLastAnalyzed =
                   <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold mb-2">Analyzing Repository</h2>
+                  <h2 className="text-xl font-semibold mb-2">
+                    Analyzing Repository
+                  </h2>
                   <p className="text-muted-foreground">
-                    We&apos;re analyzing structure, commits, contributors, and more.
+                    We&apos;re analyzing structure, commits, contributors, and
+                    more.
                   </p>
 
                   {/* Progress bar */}
@@ -503,7 +524,6 @@ const formattedLastAnalyzed =
                   </div>
                 </div>
               </div>
-
             ) : analysisTimedOut || analysisError ? (
               /* â”€â”€ Timeout / error state â”€â”€ */
               <div className="glass rounded-lg p-12 text-center space-y-6">
@@ -514,7 +534,9 @@ const formattedLastAnalyzed =
                 </div>
                 <div>
                   <h2 className="text-xl font-semibold mb-2 text-red-400">
-                    {analysisTimedOut ? "Analysis Timed Out" : "Analysis Failed"}
+                    {analysisTimedOut
+                      ? "Analysis Timed Out"
+                      : "Analysis Failed"}
                   </h2>
                   <p className="text-muted-foreground max-w-md mx-auto text-sm">
                     {analysisError}
@@ -534,46 +556,6 @@ const formattedLastAnalyzed =
                   >
                     <RefreshCw className="h-4 w-4" />
                     Check Again
-                  </button>
-                  <button
-                    onClick={() => router.push("/dashboard")}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/80 transition-all duration-300 text-sm"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                    Back to Dashboard
-                  </button>
-                </div>
-              </div>
-
-            ) : repository &&
-              !repository.commits?.length &&
-              !repository.files?.length &&
-              !repository.languages?.length &&
-              !repository.contributors?.length ? (
-              /* ── Done but no data — show empty state ── */
-              <div className="glass rounded-lg p-12 text-center space-y-6">
-                <div className="flex justify-center">
-                  <div className="p-4 rounded-full bg-primary/10">
-                    <SearchX className="h-12 w-12 text-primary" />
-                  </div>
-                </div>
-                <div>
-                  <h2 className="text-xl font-semibold mb-2">
-                    No analysis data available
-                  </h2>
-                  <p className="text-muted-foreground max-w-md mx-auto text-sm">
-                    The analysis completed but didn&apos;t find any data.
-                    This can happen with empty repositories or when
-                    the analysis process encounters issues.
-                  </p>
-                </div>
-                <div className="flex justify-center gap-3">
-                  <button
-                    onClick={handleReAnalyze}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg glass hover:bg-white/10 transition-all duration-300 text-sm"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Re-analyze Repository
                   </button>
                   <button
                     onClick={() => router.push("/dashboard")}
@@ -629,12 +611,15 @@ const formattedLastAnalyzed =
                   <Trash2 className="h-5 w-5 sm:h-6 sm:w-6 text-red-500" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-lg sm:text-xl font-bold mb-2">Delete Repository</h3>
+                  <h3 className="text-lg sm:text-xl font-bold mb-2">
+                    Delete Repository
+                  </h3>
                   <p className="text-xs sm:text-sm text-muted-foreground">
                     Are you sure you want to delete{" "}
                     <strong className="break-words">{repository?.name}</strong>?
                     This action cannot be undone and will permanently remove all
-                    repository data, including commits, contributors, and analysis results.
+                    repository data, including commits, contributors, and
+                    analysis results.
                   </p>
                 </div>
               </div>
