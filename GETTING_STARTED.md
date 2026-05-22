@@ -184,7 +184,7 @@ Vercel automatically handles background processes via serverless functions, so t
 4. Deploy automatically
 
 ### Docker
-If self-hosting via Docker, you can run the primary application container. Depending on your scaling needs, you may optionally choose to run the legacy worker as a secondary process.
+If self-hosting via Docker, run the primary application container. If your deployment uses queue-based background processing, run the legacy worker as a separate process/container.
 
 ```bash
 docker build -t gitverse-nextjs .
@@ -192,7 +192,7 @@ docker run -p 3000:3000 gitverse-nextjs
 ```
 
 ### Manual Deployment
-For deployments on custom servers (e.g., EC2, VPS) where serverless functions aren't available, you will need to run the application build alongside the worker script to process background queues
+For deployments on custom servers (e.g., EC2, VPS) where serverless functions aren't available, run the app build. If queue-based background processing is enabled, also run the worker script (for example via PM2/systemd).
 
 ```bash
 npm run build
