@@ -27,23 +27,43 @@ export async function GET(request: NextRequest) {
       })) > 0;
 
     if (!userDetails) {
-      return NextResponse.json({ message: "User not found" }, { status: 404 });
+      return NextResponse.json(
+        { message: "User not found" },
+        { 
+          status: 404,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        }
+      );
     }
 
-    return NextResponse.json({
-      id: userDetails.id,
-      name: userDetails.name,
-      email: userDetails.email,
-      image: userDetails.image,
-      createdAt: userDetails.createdAt,
-      avatarUrl: (userDetails as any).image,
-      isGoogleLinked: hasGoogleAccount,
-    });
+    return NextResponse.json(
+      {
+        id: userDetails.id,
+        name: userDetails.name,
+        email: userDetails.email,
+        image: userDetails.image,
+        createdAt: userDetails.createdAt,
+        avatarUrl: (userDetails as any).image,
+        isGoogleLinked: hasGoogleAccount,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
+    );
   } catch (error: any) {
     console.error("Error fetching user:", sanitizeErrorMessage(error));
     return NextResponse.json(
       { message: "Failed to fetch user" },
-      { status: 500 }
+      { 
+        status: 500,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      }
     );
   }
 }
