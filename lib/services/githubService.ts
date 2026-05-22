@@ -180,7 +180,7 @@ export class GitHubService {
           const rateLimitRemaining = error.response?.headers?.["x-ratelimit-remaining"];
           const retryAfterHeader = error.response?.headers?.["retry-after"];
           if (status === 429 || rateLimitRemaining === "0" || retryAfterHeader) {
-            if (config.rateLimitRetryCount >= 3) {
+            if (config.retryCount >= 3) {
               const resetHeader = error.response?.headers?.["x-ratelimit-reset"];
               let retrySeconds = 60;
 
