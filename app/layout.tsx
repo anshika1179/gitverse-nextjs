@@ -15,7 +15,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "GitVerse - AI-Powered Repository Analysis",
   description:
-    "Contribution made easy with repo visualization and AI onboarding",
+    "Contributions made easy with repo visualization and AI onboarding",
 };
 
 export default function RootLayout({
