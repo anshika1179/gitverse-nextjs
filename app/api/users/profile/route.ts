@@ -11,7 +11,7 @@ export async function PUT(request: NextRequest) {
 
     if (!name || !email) {
       return NextResponse.json(
-        { message: "Name and email are required" },
+        { error: "Name and email are required" },
         { status: 400 }
       );
     }
@@ -25,7 +25,7 @@ export async function PUT(request: NextRequest) {
 
     if (existingUser) {
       return NextResponse.json(
-        { message: "Email is already in use" },
+        { error: "Email is already in use" },
         { status: 400 }
       );
     }
@@ -98,7 +98,7 @@ export async function PUT(request: NextRequest) {
   } catch (error: any) {
     console.error("Error updating profile:", sanitizeError(error));
     return NextResponse.json(
-      { message: "Failed to update profile" },
+      { error: "Failed to update profile" },
       { status: 500 }
     );
   }
