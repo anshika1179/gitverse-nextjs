@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+// The Skeleton.tsx import update was required because the previous `@/utils/cn` path no longer exists and caused a TypeScript module resolution error.
 
 function Skeleton({
   className,
