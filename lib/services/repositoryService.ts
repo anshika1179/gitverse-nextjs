@@ -408,41 +408,7 @@ clearTimeout(timeoutId);
       // Analyze files
       console.log(`Analyzing file tree for repository ${repositoryId}`);
       await report({ progressPercent: 65, progressMessage: "Scanning files" });
-      const allFiles = await gitService.getFileTree();
-
-/**
- * Directories to ignore during file tree scan.
- * Keep this list minimal — only generated/noisy folders that add no analysis value.
- */
-const IGNORED_DIRS = new Set([
-  "node_modules",
-  ".next",
-  ".nuxt",
-  "dist",
-  "build",
-  "out",
-  ".git",
-  "coverage",
-  ".turbo",
-  ".cache",
-  "__pycache__",
-  ".pytest_cache",
-  "venv",
-  ".venv",
-  "vendor",
-  "target",        // Rust/Java build output
-  ".gradle",
-  ".mvn",
-]);
-
-const files = allFiles.filter((file) => {
-  const parts = file.path.split(/[\\/]/);
-  return !parts.some((part) => IGNORED_DIRS.has(part));
-});
-
-console.log(
-  `File scan: ${allFiles.length} total, ${files.length} after ignoring build/generated folders`
-);
+      const files = await gitService.getFileTree();
 
       // Avoid querying existing file paths (can be huge). Just rely on
       // `skipDuplicates` with the unique constraint (repositoryId, path).
