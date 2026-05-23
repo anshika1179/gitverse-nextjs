@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser } from "@/lib/api-auth";
+import { getAuthUser , sanitizeError } from "@/lib/middleware";
 import prisma from "@/lib/prisma";
 import { toJsonSafe } from "@/lib/utils/jsonSafe";
 
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     const user = await getAuthUser(request);
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -44,13 +44,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       items: toJsonSafe(sessions),
       nextCursor,
+    }, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate, private",
+      },
     });
   } catch (error: any) {
-    console.error("Fetch sessions error:", error);
+    console.error("Fetch sessions error:", sanitizeError(error));
     return NextResponse.json(
-      { error: "An unexpected error occurred" },
+      { error: "Internal server error" },
       { status: 500 }
     );
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
