@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   GitBranch,
@@ -29,8 +29,10 @@ export default function LandingPage() {
   const [repoUrl, setRepoUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [scoreAnimate, setScoreAnimate] = useState(false);
+  const [activeFeatureIndex, setActiveFeatureIndex] = useState(0);
+  const [isCarouselPaused, setIsCarouselPaused] = useState(false);
+  const slideRefs = useRef<Array<HTMLDivElement | null>>([]);
   const isAnalyzeDisabled = !repoUrl.trim() || isLoading;
-  const marqueeRef = useRef<HTMLDivElement>(null);
 
   const mentorMessages = useMemo(
     () => [
@@ -126,27 +128,6 @@ export default function LandingPage() {
     return () => window.clearTimeout(timeoutId);
   }, [mentorIsErasing, mentorMessageIndex, mentorMessages, mentorTyped]);
 
-  // Touch + focus handlers for marquee pause
-  useEffect(() => {
-    const el = marqueeRef.current;
-    if (!el) return;
-
-    const pause = () => el.classList.add("marquee--paused");
-    const resume = () => el.classList.remove("marquee--paused");
-
-    el.addEventListener("touchstart", pause, { passive: true });
-    el.addEventListener("touchend", resume, { passive: true });
-    el.addEventListener("focusin", pause);
-    el.addEventListener("focusout", resume);
-
-    return () => {
-      el.removeEventListener("touchstart", pause);
-      el.removeEventListener("touchend", resume);
-      el.removeEventListener("focusin", pause);
-      el.removeEventListener("focusout", resume);
-    };
-  }, []);
-
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!repoUrl.trim() || isLoading) return;
@@ -201,6 +182,30 @@ export default function LandingPage() {
         "Production readiness assessment, architecture pattern recognition, and intelligent recommendations.",
     },
   ];
+
+  const totalFeatures = features.length;
+  const activeFeature = features[activeFeatureIndex];
+
+  useEffect(() => {
+    if (isCarouselPaused) return;
+
+    const intervalId = window.setInterval(() => {
+      setActiveFeatureIndex((index) => (index + 1) % totalFeatures);
+    }, 6500);
+
+    return () => window.clearInterval(intervalId);
+  }, [totalFeatures, isCarouselPaused]);
+
+  useEffect(() => {
+    const activeSlide = slideRefs.current[activeFeatureIndex];
+    if (activeSlide) {
+      activeSlide.scrollIntoView({
+        behavior: "smooth",
+        inline: "center",
+        block: "nearest",
+      });
+    }
+  }, [activeFeatureIndex]);
 
   const howItWorks = [
     {
@@ -583,61 +588,67 @@ export default function LandingPage() {
             </p>
           </div>
 
-          {/* Fixed carousel: no inline --marquee-duration, ref for touch/focus, aria attrs */}
           <div
-            ref={marqueeRef}
-            className="marquee marquee--pause-on-hover"
+            className="feature-carousel"
             role="region"
+            aria-roledescription="carousel"
             aria-label="GitVerse features"
+            onMouseEnter={() => setIsCarouselPaused(true)}
+            onMouseLeave={() => setIsCarouselPaused(false)}
+            onFocus={() => setIsCarouselPaused(true)}
+            onBlur={() => setIsCarouselPaused(false)}
+            onTouchStart={() => setIsCarouselPaused(true)}
+            onTouchEnd={() => setIsCarouselPaused(false)}
           >
-            <div className="marquee__track">
-              {features.map((feature, index) => (
-                <Card
-                  key={`orig-${index}`}
-                  className="glass feature-card group"
-                >
-                  <CardHeader>
-                    <div className="w-12 h-12 rounded-lg bg-gradient-primary flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                      <feature.icon className="h-6 w-6 text-primary-foreground" />
-                    </div>
-                    <CardTitle className="font-heading">
-                      {feature.title}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <CardDescription className="text-muted-foreground text-base">
-                      {feature.description}
-                    </CardDescription>
-                  </CardContent>
-                </Card>
-              ))}
-              {/* Clone for seamless loop — distinct keys prevent React warnings */}
-              {features.map((feature, index) => (
-                <Card
-                  key={`clone-${index}`}
-                  className="glass feature-card group"
-                  aria-hidden="true"
-                >
-                  <CardHeader>
-                    <div className="w-12 h-12 rounded-lg bg-gradient-primary flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                      <feature.icon className="h-6 w-6 text-primary-foreground" />
-                    </div>
-                    <CardTitle className="font-heading">
-                      {feature.title}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <CardDescription className="text-muted-foreground text-base">
-                      {feature.description}
-                    </CardDescription>
-                  </CardContent>
-                </Card>
-              ))}
+            <div className="feature-carousel__viewport">
+              <div className="feature-carousel__track">
+                {features.map((feature, index) => (
+                  <div
+                    key={feature.title}
+                    ref={(el) => (slideRefs.current[index] = el)}
+                    className={`feature-carousel__slide ${
+                      index === activeFeatureIndex ? "active" : ""
+                    }`}
+                    aria-hidden={index !== activeFeatureIndex}
+                  >
+                    <Card className="glass feature-card group w-full">
+                      <CardHeader>
+                        <div className="w-12 h-12 rounded-lg bg-gradient-primary flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                          <feature.icon className="h-6 w-6 text-primary-foreground" />
+                        </div>
+                        <CardTitle className="font-heading">
+                          {feature.title}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <CardDescription className="text-muted-foreground text-base">
+                          {feature.description}
+                        </CardDescription>
+                      </CardContent>
+                    </Card>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            {/* Edge fades */}
-            <div className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-background to-transparent" />
-            <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-background to-transparent" />
+            <div className="feature-carousel__controls" aria-label="Feature navigation">
+              <div className="flex items-center justify-center gap-2">
+                {features.map((feature, index) => (
+                  <button
+                    key={feature.title}
+                    type="button"
+                    onClick={() => setActiveFeatureIndex(index)}
+                    aria-label={`Show ${feature.title}`}
+                    aria-current={index === activeFeatureIndex ? "true" : "false"}
+                    className={`feature-carousel__dot ${
+                      index === activeFeatureIndex
+                        ? "bg-primary"
+                        : "bg-border/40 hover:opacity-80"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </section>

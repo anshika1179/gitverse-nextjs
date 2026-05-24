@@ -151,74 +151,118 @@
     box-shadow: 0 0 20px hsl(var(--accent) / 0.3);
   }
 
-  /* ─── Marquee carousel ─────────────────────────────────────────────────────
-     Single source of truth for duration: set here, nowhere else.
-     30s on mobile, 24s on md+ screens.
-     .marquee--paused (toggled by JS on touch/focus) stops the track.
-  ─────────────────────────────────────────────────────────────────────────── */
-  .marquee {
+  /* ─── Feature carousel ─────────────────────────────────────────────────── */
+  .feature-carousel {
     position: relative;
-    overflow: hidden;
     width: 100%;
-    padding-block: 1rem;
-    --marquee-duration: 30s;
   }
 
-  @media (min-width: 768px) {
-    .marquee {
-      --marquee-duration: 24s;
-    }
+  .feature-carousel__viewport {
+    position: relative;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    border-radius: 1.5rem;
+    border: 1px solid hsl(var(--border) / 0.2);
+    background: hsl(var(--background) / 0.85);
+    padding: 1.25rem 2rem;
+    box-sizing: border-box;
   }
 
-  .marquee__track {
-    display: flex;
-    align-items: stretch;
-    gap: 1.5rem;
-    width: max-content;
-    will-change: transform;
-    animation: marquee-x var(--marquee-duration) linear infinite;
+  .feature-carousel__viewport::-webkit-scrollbar {
+    display: none;
   }
 
-  /* Pause on hover */
-  .marquee--pause-on-hover:hover .marquee__track {
-    animation-play-state: paused;
-  }
-
-  /* Pause on touch / keyboard focus (toggled via JS) */
-  .marquee--paused .marquee__track {
-    animation-play-state: paused;
-  }
-
-  /* Edge fades — use the CSS variable so they work in light AND dark mode */
-  .marquee::before,
-  .marquee::after {
+  .feature-carousel__viewport::before,
+  .feature-carousel__viewport::after {
     content: "";
     position: absolute;
     top: 0;
-    width: 60px;
-    height: 100%;
-    z-index: 10;
+    bottom: 0;
+    width: 8rem;
     pointer-events: none;
+    z-index: 10;
   }
 
-  .marquee::before {
+  .feature-carousel__viewport::before {
     left: 0;
     background: linear-gradient(to right, hsl(var(--background)), transparent);
   }
 
-  .marquee::after {
+  .feature-carousel__viewport::after {
     right: 0;
     background: linear-gradient(to left, hsl(var(--background)), transparent);
   }
 
-  /* ─── Feature cards ────────────────────────────────────────────────────────
-     Unified width at all breakpoints — no jump mid-scroll.
-     300px on mobile, 300px on md+. Adjust the single value here if needed.
-  ─────────────────────────────────────────────────────────────────────────── */
-  .feature-card {
-    width: 300px;
+  .feature-carousel__track {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    padding: 0 0.25rem;
+  }
+
+  .feature-carousel__slide {
+    flex: 0 0 300px;
     min-width: 300px;
-    flex-shrink: 0;
+    max-width: 300px;
+    scroll-snap-align: center;
+    display: grid;
+    place-items: center;
+    transition: transform 300ms ease, filter 300ms ease, opacity 300ms ease;
+  }
+
+  .feature-carousel__slide:not(.active) {
+    filter: blur(2px);
+    opacity: 0.85;
+    transform: scale(0.98);
+  }
+
+  @media (max-width: 768px) {
+    .feature-carousel__viewport {
+      padding-left: 1rem;
+      padding-right: 1rem;
+    }
+
+    .feature-carousel__slide {
+      flex: 0 0 min(100%, 300px);
+      min-width: min(100%, 300px);
+      max-width: min(100%, 300px);
+    }
+  }
+
+  .feature-carousel__slide.active {
+    filter: none;
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .feature-carousel__controls {
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+
+  .feature-carousel__dot {
+    width: 0.625rem;
+    height: 0.625rem;
+    border-radius: 9999px;
+    background: hsl(var(--border) / 0.4);
+    border: 1px solid hsl(var(--border) / 0.1);
+    transition: opacity 200ms ease, transform 200ms ease, background-color 200ms ease;
+  }
+
+  .feature-carousel__dot[aria-current="true"] {
+    background: hsl(var(--primary));
+    opacity: 1;
+    transform: scale(1.15);
+  }
+
+  .feature-card {
+    width: 100%;
     border-radius: 1.5rem;
     transition:
       transform 260ms ease,
