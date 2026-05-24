@@ -226,6 +226,7 @@ export function LanguageDistributionChart({
         />
       </div>
       )}
+      {/* Empty state when languageData is empty */}
       {languageData.length === 0 && (
         <div className="text-center py-8 text-muted-foreground text-sm">
           No language data available for this repository
