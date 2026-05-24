@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 import { Card, EmptyState } from "@/components/ui";
-import { Network } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Network, Download, Loader2 } from "lucide-react";
 import { GraphAnalyzer } from "@/utils/graphAnalyzer";
 import { ModuleSummaryPanel } from "./ModuleSummaryPanel";
 import { AISettingsModal } from "@/components/settings/AISettingsModal";
+import { exportGraphAsPNG, exportGraphAsPDF } from "@/utils/graphExport";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 
 
 
@@ -18,6 +26,31 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
   
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportPNG = async () => {
+    if (!svgRef.current) return;
+    setIsExporting(true);
+    try {
+      await exportGraphAsPNG(svgRef.current);
+    } catch (error) {
+      console.error("Export failed", error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if (!svgRef.current) return;
+    setIsExporting(true);
+    try {
+      await exportGraphAsPDF(svgRef.current);
+    } catch (error) {
+      console.error("Export failed", error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const graphAnalyzer = new GraphAnalyzer();
   const graphData = graphAnalyzer.buildDependencyGraph(repository?.files || []);
@@ -250,15 +283,33 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
             Interactive visualization of file dependencies and relationships
           </p>
         </div>
-        <div className="flex flex-wrap gap-3 sm:gap-4 text-xs">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-purple-500 flex-shrink-0" />
-            <span>Folders</span>
+        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4 text-xs">
+          <div className="flex gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-purple-500 flex-shrink-0" />
+              <span>Folders</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0" />
+              <span>Files</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0" />
-            <span>Files</span>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={isExporting} className="gap-2">
+                {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleExportPNG}>
+                Export as PNG (High Res)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportPDF}>
+                Export as PDF (Vector Quality)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
       {graphData.nodes.length === 0 ? (
