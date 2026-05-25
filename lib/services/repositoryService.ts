@@ -4,6 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
 import * as fs from "fs/promises";
+import { invalidateGeminiAnalysisCacheForRepository } from "./geminiAnalysisCacheService";
 import { FileChangeType } from "@prisma/client";
 
 function yieldIfHighMemory(threshold = 0.7): Promise<void> {
@@ -517,6 +518,21 @@ export class RepositoryService {
           size: size,
         },
       });
+
+      // Cache invalidation: keep only entries for the current HEAD commit on the default branch.
+      try {
+        const headCommit = await prisma.commit.findFirst({
+          where: { repositoryId, branch: defaultBranch },
+          orderBy: { committedAt: "desc" },
+          select: { hash: true },
+        });
+
+        if (headCommit?.hash) {
+          await invalidateGeminiAnalysisCacheForRepository(repositoryId, headCommit.hash);
+        }
+      } catch (error) {
+        console.warn("Gemini cache invalidation failed:", error);
+      }
 
       await report({ progressPercent: 100, progressMessage: "Completed" });
 
