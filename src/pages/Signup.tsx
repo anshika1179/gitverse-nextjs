@@ -171,11 +171,13 @@ export default function Signup() {
       });
       return;
     }
-
-    if (password.length < 8) {
-  toast({
-    title: "Error",
-    description: "Password must be at least 8 characters long",
+    const passwordRegex =
+          /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+    if (!passwordRegex.test(password)) {
+      toast({
+        title: "Error",
+        description:
+        "Password must be at least 8 characters and include uppercase, lowercase and a number",
         variant: "destructive",
       });
       return;
