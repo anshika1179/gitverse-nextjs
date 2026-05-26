@@ -1,8 +1,7 @@
 "use client";
 
 export const dynamic = "force-dynamic";
-import { Skeleton } from "@/components/ui/Skeleton";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   GitBranch,
@@ -49,6 +48,7 @@ interface Repository {
 export default function Dashboard() {
   const { user } = useAuth();
   const router = useRouter();
+  const searchRef = useRef<HTMLInputElement>(null);
   const [repoUrl, setRepoUrl] = useState("");
   const [repoScope, setRepoScope] = useState("");
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -67,23 +67,17 @@ export default function Dashboard() {
         active instanceof HTMLSelectElement ||
         (active instanceof HTMLElement && active.isContentEditable);
 
-      if (e.key === "/" && !isTyping) {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-
       if (
-        e.key === "/" &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey &&
-        !e.shiftKey &&
-        !isTyping
+      e.key === "/" &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.shiftKey &&
+      !isTyping
       ) {
-        setRepoUrl("");
-        setRepoScope("");
-        searchRef.current?.blur();
-      }
+  e.preventDefault();
+  searchRef.current?.focus();
+}
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -248,23 +242,23 @@ if (loading) {
         
         {/* Welcome skeleton */}
         <div className="space-y-2">
-          <Skeleton width="250px" height="28px" />
-          <Skeleton width="400px" height="18"/>
+          <Skeleton className="w-[250px] h-[28px]" />
+          <Skeleton className="w-[400px] h-[18px]" />
         </div>
 
         {/* Input skeleton */}
         <div className="p-6 border rounded-lg space-y-3">
-          <Skeleton width="100%" height="40" />
-          <Skeleton width="180" height="40" />
+          <Skeleton className="w-full h-[40px]" />
+          <Skeleton className="w-[180px] h-[40px]" />
         </div>
 
         {/* Stats skeleton */}
         <div className="grid grid-cols-4 gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="p-4 border rounded-lg space-y-3">
-              <Skeleton width="60%" height="16" />
-              <Skeleton width="40%" height="28" />
-              <Skeleton width="80%" height="12" />
+              <Skeleton className="w-[60%] h-[16px]" />
+              <Skeleton className="w-[40%] h-[28px]" />
+              <Skeleton className="w-[80%] h-[12px]" />
             </div>
           ))}
         </div>
@@ -272,19 +266,19 @@ if (loading) {
         {/* Cards skeleton */}
         <div className="grid grid-cols-3 gap-6">
           <div className="col-span-2 space-y-3">
-            <Skeleton width="40%" height="20" />
+            <Skeleton className="w-[40%] h-[20px]" />
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="p-4 border rounded-lg space-y-2">
-                <Skeleton width="30%" height="18" />
-                <Skeleton width="70%" height="14" />
+                <Skeleton className="w-[30%] h-[18px]" />
+                <Skeleton className="w-[70%] h-[14px]" />
               </div>
             ))}
           </div>
 
           <div className="space-y-3">
-            <Skeleton width="50%" height="20" />
+            <Skeleton className="w-[50%] h-[20px]" />
             {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} width="100%" height="40" />
+              <Skeleton key={i} className="w-full h-[40px]" />
             ))}
           </div>
         </div>
@@ -312,6 +306,7 @@ if (loading) {
           <CardContent className="pt-6">
             <div className="flex flex-col sm:flex-row gap-3">
               <Input
+                ref={searchRef}
                 type="url"
                 placeholder="https://github.com/username/repository"
                 value={repoUrl}
@@ -337,9 +332,6 @@ if (loading) {
                 className="flex-1 bg-background/50 max-w-sm"
                 onKeyPress={(e) => e.key === "Enter" && handleAnalyze()}
               />
-            </div>
-            <div className="mt-3">
-              <ShortcutHint />
             </div>
           </CardContent>
         </Card>

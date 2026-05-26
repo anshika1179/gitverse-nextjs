@@ -171,7 +171,11 @@ export class RepositoryService {
    */
   async analyzeRepository(
     repositoryId: number,
-    opts?: { onProgress?: RepositoryAnalysisProgressReporter; scope?: string },
+    opts?: {
+  onProgress?: RepositoryAnalysisProgressReporter;
+  scope?: string;
+  timeoutMs?: number;
+},
   ) {
     const repository = await prisma.repository.findUnique({
       where: { id: repositoryId },
@@ -505,12 +509,6 @@ export class RepositoryService {
       }
 
       // Detect languages
-      console.log(`Detecting languages for repository ${repositoryId}`);
-      await report({
-        progressPercent: 90,
-        progressMessage: "Detecting languages",
-      });
-      const languages = await gitService.detectLanguages(opts?.scope);
       // Languages to ignore (config/data formats, not actual code)
       const ignoredLanguages = ["JSON", "YAML", "Markdown", "TOML", "CSV"];
 

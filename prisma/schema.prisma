@@ -7,6 +7,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum JobStatus {
@@ -184,6 +185,7 @@ model Repository {
   contributors   Contributor[]
   languages      Language[]
   analysisJobs   AnalysisJob[]
+  geminiAnalysisCaches GeminiAnalysisCache[]
   @@index([url])
   @@map("repositories")
   @@index([userId])

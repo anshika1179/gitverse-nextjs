@@ -29,21 +29,18 @@ export const Breadcrumbs: React.FC<BreadcrumbsProps> = ({ items }) => {
             {index > 0 && <ChevronRight size={16} className="text-muted-foreground" />}
             
             {isLast || isActive ? (
-{isLast || isActive ? (
   <span className="font-medium text-foreground">
     {item.label}
   </span>
 ) : (
-                {item.label}
-              </span>
-            ) : (
-              <Link
-                href={item.path}
-                className="hover:text-primary dark:hover:text-primary-400 transition-colors"
-              >
-                {item.label}
-              </Link>
-            )}
+  <Link
+    href={item.path}
+    className="hover:text-primary dark:hover:text-primary-400 transition-colors"
+  >
+    {item.label}
+  </Link>
+)}
+          
           </React.Fragment>
         )
       })}
