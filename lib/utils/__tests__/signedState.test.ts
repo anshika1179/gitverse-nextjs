@@ -2,6 +2,7 @@ import { createSignedState, verifySignedState } from '../signedState';
 
 describe('signedState', () => {
   const originalSecret = process.env.GITHUB_APP_STATE_SECRET;
+  const originalNextAuthSecret = process.env.NEXTAUTH_SECRET;
 
   beforeAll(() => {
     process.env.GITHUB_APP_STATE_SECRET = 'test-secret-key-123456';
@@ -9,6 +10,7 @@ describe('signedState', () => {
 
   afterAll(() => {
     process.env.GITHUB_APP_STATE_SECRET = originalSecret;
+    process.env.NEXTAUTH_SECRET = originalNextAuthSecret;
   });
 
   it('creates and verifies signed states correctly', () => {
@@ -33,17 +35,42 @@ describe('signedState', () => {
     const payload = { userId: '123' };
     const signed = createSignedState(payload);
     
-    // Modify signature part
-    const [body, sig] = signed.split('.');
-    const badSigned = `${body}.badsignature123`;
+    // Modify signature part while keeping the same length
+    const [body, sigStr] = signed.split('.');
+    
+    // Decode signature string to Buffer
+    const sigBuf = Buffer.from(
+      sigStr.replace(/-/g, '+').replace(/_/g, '/') +
+        '==='.slice((sigStr.length + 3) % 4),
+      'base64'
+    );
+    
+    // Mutate the first byte
+    sigBuf[0] = sigBuf[0] ^ 1;
+    
+    // Re-encode to base64url
+    const badSigStr = sigBuf
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '');
+      
+    const badSigned = `${body}.${badSigStr}`;
     
     expect(verifySignedState(badSigned)).toEqual({ ok: false, error: 'invalid_signature' });
   });
 
   it('fails verification if GITHUB_APP_STATE_SECRET is not configured', () => {
-    process.env.GITHUB_APP_STATE_SECRET = '';
-    process.env.NEXTAUTH_SECRET = '';
+    const prevSecret = process.env.GITHUB_APP_STATE_SECRET;
+    const prevNextAuthSecret = process.env.NEXTAUTH_SECRET;
+    try {
+      process.env.GITHUB_APP_STATE_SECRET = '';
+      process.env.NEXTAUTH_SECRET = '';
 
-    expect(() => createSignedState({ a: 1 })).toThrow();
+      expect(() => createSignedState({ a: 1 })).toThrow();
+    } finally {
+      process.env.GITHUB_APP_STATE_SECRET = prevSecret;
+      process.env.NEXTAUTH_SECRET = prevNextAuthSecret;
+    }
   });
 });
