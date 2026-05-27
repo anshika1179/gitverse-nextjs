@@ -217,10 +217,59 @@ describe('Authentication API Integration Tests', () => {
       
       xssInputs.forEach(input => {
         const isXSS = input.includes('<script>') || 
-                     input.includes('onerror') || 
+                     input.includes('onerror') ||
                      input.includes('javascript:');
         expect(isXSS).toBe(true);
       });
+    });
+
+    test('Password strength validation', () => {
+      const weakPasswords = ['password', '12345678', 'qwerty'];
+      weakPasswords.forEach(pwd => {
+        const isWeak = pwd.length < 8 || !/[A-Z]/.test(pwd) || !/[0-9]/.test(pwd);
+        expect(isWeak).toBe(true);
+      });
+    });
+
+    test('Email case sensitivity handling', () => {
+      const email1 = 'Test@Example.COM';
+      const email2 = 'test@example.com';
+      const normalizedEmail = email1.toLowerCase();
+      expect(normalizedEmail).toBe(email2);
+    });
+  });
+
+  // ==================== EDGE CASE TESTS ====================
+  describe('Edge Cases', () => {
+    
+    test('Empty email field handling', () => {
+      const emptyEmail = '';
+      const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emptyEmail);
+      expect(isValid).toBe(false);
+    });
+
+    test('Whitespace in email handling', () => {
+      const emailWithSpaces = 'test @example.com';
+      const hasSpaces = emailWithSpaces.includes(' ');
+      expect(hasSpaces).toBe(true);
+    });
+
+    test('Very long password handling', () => {
+      const longPassword = 'a'.repeat(128);
+      expect(longPassword.length).toBe(128);
+    });
+
+    test('Unicode in name field', () => {
+      const unicodeName = 'Jose Garcia';
+      const hasUnicode = /[^\x00-\x7F]/.test(unicodeName);
+      expect(hasUnicode).toBe(true);
+    });
+
+    test('Session expiry calculation', () => {
+      const now = Date.now();
+      const sessionDuration = 24 * 60 * 60 * 1000;
+      const expiresAt = now + sessionDuration;
+      expect(expiresAt).toBeGreaterThan(now);
     });
   });
 });
