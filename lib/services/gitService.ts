@@ -10,13 +10,6 @@ import * as fs from "fs/promises";
 import { createReadStream } from "fs";
 import readline from "readline";
 
-const execPromiseRaw = promisify(exec);
-
-const DEFAULT_EXEC_OPTIONS: ExecOptions = {
-  encoding: "utf8",
-  maxBuffer: 100 * 1024 * 1024, // 100 MB for very large repos
-};
-
 const DEFAULT_GIT_TIMEOUT_MS = 2 * 60 * 1000;
 const GIT_CLONE_TIMEOUT_MS = 10 * 60 * 1000;
 const GIT_LOG_TIMEOUT_MS = 5 * 60 * 1000;
@@ -45,7 +38,7 @@ function countLinesReadStream(filePath: string): Promise<number> {
   });
 }
 
-function execPromise(
+function spawnOutput(
   command: string,
   options: ExecOptions & { signal?: AbortSignal } = {},
 ): Promise<{ stdout: string; stderr: string }> {
@@ -186,12 +179,14 @@ export class GitService {
     this.signal = signal;
   }
 
-  //helper to wrap execpromise with signal
-
-  private exec(command: string, options: ExecOptions = {}) {
-    return execPromise(command, {
+  private spawnGit(
+    args: string[],
+    options: { timeout?: number } = {},
+  ): Promise<{ stdout: string; stderr: string }> {
+    return spawnOutput("git", args, {
+      cwd: this.repoPath,
       signal: this.signal,
-      ...options,
+      timeout: options.timeout,
     });
   }
 
@@ -291,19 +286,42 @@ export class GitService {
   }
 
   /**
+   * Check if a public GitHub repository exists and is accessible.
+   */
+  static async checkGithubRepositoryExists(url: string): Promise<boolean> {
+    try {
+      const cleanUrl = url.trim().replace(/\/$/, "").replace(/\.git$/, "");
+      const parts = cleanUrl.split("/");
+      const repo = parts[parts.length - 1];
+      const owner = parts[parts.length - 2];
+
+      if (!owner || !repo) return false;
+
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+        headers: {
+          "User-Agent": "GitVerse-App",
+        },
+      });
+      return res.status === 200;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Get all branches in the repository
    */
   async getBranches(): Promise<BranchData[]> {
     try {
-      const { stdout: defaultBranch } = await this.exec(
-        `cd "${this.repoPath}" && git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'`,
+      const { stdout: defaultBranch } = await this.spawnGit(
+        ["symbolic-ref", "refs/remotes/origin/HEAD"],
         { timeout: DEFAULT_GIT_TIMEOUT_MS },
       );
-      const defaultBranchName = defaultBranch.trim();
+      const defaultBranchName = defaultBranch.trim().replace(/^refs\/remotes\/origin\//, "");
 
       // Get both local and remote branches
-      const { stdout } = await this.exec(
-        `cd "${this.repoPath}" && git for-each-ref --format='%(refname:short)|%(committerdate:iso)|%(objectname)' refs/heads/ refs/remotes/origin/`,
+      const { stdout } = await this.spawnGit(
+        ["for-each-ref", "--format=%(refname:short)|%(committerdate:iso)|%(objectname)", "refs/heads/", "refs/remotes/origin/"],
         { timeout: DEFAULT_GIT_TIMEOUT_MS },
       );
 
@@ -330,8 +348,8 @@ export class GitService {
       // Fire all rev-list --count in parallel so one bad ref doesn't block the rest.
       const countResults = await Promise.allSettled(
         refEntries.map((entry) =>
-          this.exec(
-            `cd "${this.repoPath}" && git rev-list --count "${entry.fullName}"`,
+          this.spawnGit(
+            ["rev-list", "--count", entry.fullName],
             { timeout: DEFAULT_GIT_TIMEOUT_MS },
           ).then(({ stdout }) => parseInt(stdout.trim())),
         ),
@@ -570,8 +588,8 @@ export class GitService {
   async getContributors(): Promise<ContributorData[]> {
     try {
       // Contributor scans can be expensive; cap by commit count.
-      const { stdout } = await this.exec(
-        `cd "${this.repoPath}" && git log --format="%an|%ae|%aI" --numstat -n ${MAX_CONTRIBUTOR_COMMITS}`,
+      const { stdout } = await this.spawnGit(
+        ["log", "--format=%an|%ae|%aI", "--numstat", "-n", String(MAX_CONTRIBUTOR_COMMITS)],
         { timeout: GIT_LOG_TIMEOUT_MS },
       );
 
@@ -752,11 +770,9 @@ export class GitService {
     }[]
   > {
     try {
-      const scopeArg = scope ? ` "${scope}"` : "";
-      const { stdout } = await execPromise(
-        `cd "${this.repoPath}" && git ls-files${scopeArg}`,
-        { timeout: DEFAULT_GIT_TIMEOUT_MS },
-      );
+      const args = ["ls-files"];
+      if (scope) args.push(scope);
+      const { stdout } = await this.spawnGit(args, { timeout: DEFAULT_GIT_TIMEOUT_MS });
 
       const files: {
         path: string;
@@ -873,11 +889,12 @@ export class GitService {
    */
   async getRepositorySize(): Promise<number> {
     try {
-      const { stdout } = await this.exec(
-        `cd "${this.repoPath}" && du -sb . | cut -f1`,
-        { timeout: DEFAULT_GIT_TIMEOUT_MS },
-      );
-      return parseInt(stdout.trim());
+      const { stdout } = await spawnOutput("du", ["-sb", "."], {
+        cwd: this.repoPath,
+        signal: this.signal,
+        timeout: DEFAULT_GIT_TIMEOUT_MS,
+      });
+      return parseInt(stdout.trim().split("\t")[0]);
     } catch (error: any) {
       return 0;
     }

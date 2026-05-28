@@ -7,12 +7,13 @@ import { isHttpError, requireAuth, sanitizeError } from "@/lib/middleware";
 import { repositoryService } from "@/lib/services/repositoryService";
 import { analysisJobService } from "@/lib/services/analysisJobService";
 import { triggerAnalysisWorkerWorkflow } from "@/lib/services/analysisWorkerTriggerService";
+import { GitService } from "@/lib/services/gitService";
 import { logger } from "@/lib/logger";
 import { apiError, apiSuccess } from "@/lib/utils/apiResponse";
 function kickLocalRunner(request: NextRequest) {
   if (process.env.NODE_ENV === "production") return;
   const origin = new URL(request.url).origin;
-  const secret = process.env.ANALYSIS_RUNNER_SECRET;
+  const secret = process.env.ANALYSIS_RUNNER_SECRET || getEphemeralSecret();
   void fetch(`${origin}/api/internal/run-analysis`, {
     method: "POST",
     headers: secret ? { "x-analysis-runner-secret": secret } : undefined,
@@ -32,6 +33,30 @@ function kickProductionWorker() {
   });
 }
 
+function normalizeGitHubRepoUrl(input: string): string | null {
+  const trimmed = input.trim();
+
+  const patterns = [
+    /^https:\/\/github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i,
+    /^http:\/\/github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?\/?$/i,
+    /^git@github\.com:([^/\s]+)\/([^/\s#?]+?)(?:\.git)?$/i,
+    /^ssh:\/\/git@github\.com\/([^/\s]+)\/([^/\s#?]+?)(?:\.git)?$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+
+    if (match) {
+      const owner = match[1];
+      const repo = match[2];
+
+      return `https://github.com/${owner}/${repo}`;
+    }
+  }
+
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const user = await requireAuth(request);
@@ -47,6 +72,18 @@ export async function POST(request: NextRequest) {
       return apiError(
         "Invalid repository URL. Use a full repository URL like https://github.com/owner/repo",
         400,
+      );
+    }
+
+    // Backend check to catch non-existent or private GitHub repositories
+    const exists = await GitService.checkGithubRepositoryExists(normalizedUrl);
+    if (!exists) {
+      return NextResponse.json(
+        {
+          error: "NOT_FOUND",
+          message: "Repository not found. Please ensure the URL is correct and the repository is public.",
+        },
+        { status: 404 }
       );
     }
 
@@ -68,9 +105,16 @@ export async function POST(request: NextRequest) {
 
     console.log("Repository created:", repository.id);
 
+    const rawScope = body.scope;
+    if (rawScope != null && (typeof rawScope !== "string" || !isValidGitScope(rawScope))) {
+      return NextResponse.json(
+        { error: "Invalid scope. Only alphanumeric characters, underscore, dot, slash, and hyphen are allowed." },
+        { status: 400 },
+      );
+    }
     let trimmedScope: string | undefined = undefined;
-    if (body.scope && typeof body.scope === "string") {
-      trimmedScope = body.scope.trim();
+    if (rawScope && typeof rawScope === "string") {
+      trimmedScope = rawScope.trim();
     }
     const job = await analysisJobService.createRepositoryAnalysisJob({
       repositoryId: repository.id,
@@ -108,11 +152,21 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAuth(request);
-    const repositories = await repositoryService.listRepositories(user.userId);
+    
+    const { searchParams } = new URL(request.url);
+    const limitParam = searchParams.get("limit");
+    const cursorParam = searchParams.get("cursor");
 
     return apiSuccess({ repositories });
   } catch (error: any) {
+    console.error("List repositories error:", error);
+
     logger.error({ err: sanitizeError(error) }, "List repositories error");
+    const prismaError = getPrismaErrorResponse(error);
+    if (prismaError) {
+      return prismaError;
+    }
+
     if (isHttpError(error)) {
       return apiError(error.message, error.status);
     }
