@@ -9,6 +9,7 @@ import {
 import { isAxiosError } from "axios";
 import { sanitizeError } from "@/lib/middleware";
 import crypto from "crypto";
+import { QuotaService, QuotaExceededError } from "@/lib/services/quotaService";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // 5 minutes max duration for Vercel
@@ -168,6 +169,53 @@ export async function POST(request: NextRequest) {
     }
 
     try {
+      // Gate Gemini analysis with Installation Quota
+      try {
+        await QuotaService.checkAndReserveQuota(installationId, 10000);
+      } catch (quotaError: any) {
+        if (quotaError instanceof QuotaExceededError) {
+          console.warn(`[Quota] Installation ${installationId} exhausted quota: ${quotaError.message}`);
+          
+          const rateLimitMessage = `> [!WARNING]\n> **GitVerse AI Analysis Quota Exhausted**\n>\n> ${quotaError.message}\n> Analysis will resume automatically once the quota window resets.\n\n_Note: This is an automated message to prevent excessive API usage (Denial-of-Wallet protection)._`;
+          
+          // Check if we already posted a rate limit message recently to avoid spam
+          const recentReviews = await prisma.pRReview.findFirst({
+            where: {
+              pullRequest: { repoId: enabledRepo.id, prNumber: number },
+              reviewText: { contains: "Quota Exhausted" },
+              createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) } // within last hour
+            }
+          });
+          
+          if (!recentReviews) {
+            await github.postPullRequestComment(owner, repo, number, rateLimitMessage);
+            
+            // Log it in PRReview so we don't spam it again
+            await prisma.pRReview.update({
+              where: { id: reviewRow.id },
+              data: {
+                reviewText: rateLimitMessage,
+                rawJson: { quota_exceeded: true },
+              }
+            });
+          } else {
+             // Cleanup placeholder if not needed
+             await prisma.pRReview.delete({ where: { id: reviewRow.id } }).catch(() => null);
+          }
+          
+          await prisma.webhookEvent.update({
+            where: { id: eventId },
+            data: { status: "rate_limited", error: quotaError.message },
+          });
+
+          return NextResponse.json(
+            { error: "Quota exceeded", message: quotaError.message },
+            { status: 429 }
+          );
+        }
+        throw quotaError; // Re-throw other errors
+      }
+
       const { review, prUrl } = await reviewPullRequest({
         owner,
         repo,
