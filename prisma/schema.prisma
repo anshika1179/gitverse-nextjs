@@ -16,6 +16,14 @@ enum JobStatus {
   FAILED
 }
 
+enum WebhookStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  RATE_LIMITED
+}
+
 enum PullRequestStatus {
   OPEN
   CLOSED
@@ -406,4 +414,36 @@ model LoginAttempt {
   @@index([email, createdAt(sort: Desc)])
   @@index([createdAt])
   @@map("login_attempts")
+}
+
+model WebhookEvent {
+  id                 Int           @id @default(autoincrement())
+  githubDeliveryId   String        @unique @map("github_delivery_id")
+  event              String
+  action             String?
+  installationId     BigInt?       @map("installation_id")
+  repositoryFullName String?       @map("repository_full_name")
+  payload            Json
+  status             WebhookStatus @default(QUEUED)
+  errorMessage       String?       @map("error_message")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  @@index([installationId, status])
+  @@index([createdAt])
+  @@map("webhook_events")
+}
+
+model GitHubInstallationQuota {
+  id                 Int      @id @default(autoincrement())
+  installationId     BigInt   @unique @map("installation_id")
+  requestsUsed       Int      @default(0) @map("requests_used")
+  tokensUsed         Int      @default(0) @map("tokens_used")
+  currentWindowStart DateTime @default(now()) @map("current_window_start")
+  quotaStatus        String   @default("active") @map("quota_status") // active, exhausted, suspended
+  lastRequestAt      DateTime @default(now()) @map("last_request_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("github_installation_quotas")
 }
