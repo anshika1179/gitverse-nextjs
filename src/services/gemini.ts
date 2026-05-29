@@ -170,6 +170,38 @@ User Question: ${message}
     }
   }
 
+  async simulatePullRequest(repositoryId: number | undefined, diff: string): Promise<string> {
+    try {
+      const res = await fetch("/api/ai/simulate-pr", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...this.getAuthHeaders(),
+        },
+        body: JSON.stringify({ repositoryId, diff }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          data?.error || "Failed to simulate pull request review"
+        );
+      }
+
+      const text = data?.review;
+      if (typeof text !== "string") {
+        throw new Error("Invalid response from AI service");
+      }
+
+      return text;
+    } catch (error) {
+      console.error("PR simulator error:", error);
+      throw new Error(
+        error instanceof Error ? error.message : "Failed to simulate pull request review"
+      );
+    }
+  }
   getChatHistory(): ChatMessage[] {
     return [];
   }
