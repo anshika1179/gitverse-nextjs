@@ -514,9 +514,10 @@ export class GitHubService {
   /**
    * Fetch file content from repository
    */
-  async getFileContent(owner: string, repo: string, path: string): Promise<string | null> {
+  async getFileContent(owner: string, repo: string, path: string, ref?: string): Promise<string | null> {
     try {
-      const response = await this.client.get(`/repos/${owner}/${repo}/contents/${path}`);
+      const url = ref ? `/repos/${owner}/${repo}/contents/${path}?ref=${ref}` : `/repos/${owner}/${repo}/contents/${path}`;
+      const response = await this.client.get(url);
       if (response.data && response.data.content) {
         return Buffer.from(response.data.content, "base64").toString("utf-8");
       }

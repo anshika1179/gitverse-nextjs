@@ -11,6 +11,7 @@ import { sanitizeError } from "@/lib/middleware";
 import crypto from "crypto";
 import { QuotaService } from "@/lib/services/quotaService";
 import { IssueTriageService } from "@/lib/services/issue-triage";
+import { ImpactAnalysisService } from "@/lib/services/impact-analysis";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // 5 minutes max duration for Vercel
@@ -278,6 +279,19 @@ export async function POST(request: NextRequest) {
           } as any,
         },
       });
+
+      // Execute dependency impact analysis
+      try {
+        const impactService = new ImpactAnalysisService();
+        await impactService.analyzePR({
+          owner,
+          repo,
+          pullNumber: number,
+          githubToken: installationToken,
+        });
+      } catch (impactErr) {
+        console.error("Dependency impact analysis failed:", impactErr);
+      }
 
       await prisma.webhookEvent.update({
         where: { id: eventId },
