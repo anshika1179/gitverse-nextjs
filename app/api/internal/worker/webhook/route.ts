@@ -45,6 +45,19 @@ function isInternalAuthorized(request: NextRequest): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  const baseUrl = process.env.NEXTAUTH_URL || `http://${request.headers.get("host") || "localhost:3000"}`;
+  
+  try {
+    return await handlePost(request);
+  } finally {
+    // Crucial: Drain the queue by picking up the next pending jobs
+    webhookQueue.triggerWorkers(baseUrl).catch(err => {
+      console.error("[Worker] Failed to trigger next jobs:", err);
+    });
+  }
+}
+
+async function handlePost(request: NextRequest) {
   if (!isInternalAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -401,6 +414,12 @@ export async function POST(request: NextRequest) {
     
     await prisma.webhookEvent.update({
       where: { id: eventId },
+      data: {
+        status: shouldRetry ? "pending" : "failed",
+        error: String(error?.message || error),
+        retryCount: currentRetryCount + 1,
+        nextRetryAt: shouldRetry ? new Date(Date.now() + retryDelay) : null,
+      },
       data: { status: "failed", error: String(error?.message || error) },
     });
 

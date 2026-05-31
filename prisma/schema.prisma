@@ -206,6 +206,8 @@ model Repository {
   languages           Language[]
   analysisJobs        AnalysisJob[]
   geminiAnalysisCache GeminiAnalysisCache[]
+  securitySandboxes   SecuritySandbox[]
+  reviewPolicies      ReviewPolicy[]
   policyAssignment    RepositoryPolicyAssignment?
 
   @@index([url])
@@ -459,6 +461,44 @@ model WebhookEvent {
   @@map("webhook_events")
 }
 
+model SecuritySandbox {
+  id             String    @id @default(uuid()) @db.Uuid
+  repositoryId   Int       @map("repository_id")
+  pullRequestId  Int?      @map("pull_request_id")
+  headSha        String    @map("head_sha")
+  status         String    @default("pending") // pending, running, completed, failed, timeout
+  containerId    String?   @map("container_id") @db.Text
+  imageUrl       String?   @map("image_url") @db.Text
+  testResults    Json?     @map("test_results")
+  exploitPayload String?   @map("exploit_payload") @db.Text
+  stackTrace     String?   @map("stack_trace") @db.Text
+  error          String?   @db.Text
+  startedAt      DateTime? @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryId, headSha])
+  @@index([status])
+  @@map("security_sandboxes")
+}
+
+model ReviewPolicy {
+  id             Int      @id @default(autoincrement())
+  repositoryId   Int      @map("repository_id")
+  name           String
+  description    String?  @db.Text
+  rules          Json     // Array of { rule: string, severity: "critical"|"high"|"medium"|"low" }
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryId])
+  @@map("review_policies")
 model AiQuota {
   id               String    @id @default(uuid()) @db.Uuid
   installationId   BigInt    @unique @map("installation_id")

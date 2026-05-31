@@ -1,5 +1,6 @@
 import { GitHubService } from "@/lib/services/githubService";
 import { GeminiService } from "@/lib/services/geminiService";
+import { getActivePoliciesForRepository, buildPolicyPromptSection } from "@/lib/services/reviewPolicyService";
 
 export type ReviewSeverity = "critical" | "high" | "medium" | "low";
 export type ReviewCategory =
@@ -9,7 +10,8 @@ export type ReviewCategory =
   | "maintainability"
   | "style"
   | "testing"
-  | "documentation";
+  | "documentation"
+  | "policy-violation";
 
 export type PRReviewIssue = {
   title: string;
@@ -51,7 +53,8 @@ function isValidCategory(value: unknown): value is ReviewCategory {
     value === "maintainability" ||
     value === "style" ||
     value === "testing" ||
-    value === "documentation"
+    value === "documentation" ||
+    value === "policy-violation"
   );
 }
 
@@ -205,6 +208,8 @@ export async function reviewPullRequest(params: {
   repo: string;
   number: number;
   githubToken?: string;
+  repositoryId?: number;
+}): Promise<{ review: PRReviewResponse; prTitle: string; prUrl: string }> {
   timeoutEstimator?: TimeoutEstimatorService;
 }): Promise<{ review: PRReviewResponse; prTitle: string; prUrl: string; tokensConsumed?: number }> {
   const github = new GitHubService(params.githubToken);
@@ -243,6 +248,18 @@ export async function reviewPullRequest(params: {
   const processChunk = async (chunkFiles: typeof prFiles, chunkIndex: number, totalChunks: number): Promise<PRReviewResponse | null> => {
     const { diff, stats } = buildDiffForPrompt(chunkFiles);
 
+  // Fetch active organizational policies for this repository
+  let policySection = "";
+  if (params.repositoryId) {
+    try {
+      const policies = await getActivePoliciesForRepository(params.repositoryId);
+      policySection = buildPolicyPromptSection(policies);
+    } catch (error) {
+      console.warn("[reviewPullRequest] Failed to fetch review policies:", error);
+    }
+  }
+
+  const prompt = `You are a senior code reviewer. Review the following GitHub Pull Request changes.
     if (!diff) {
       if (totalChunks === 1) {
         throw new Error("PR diff is unavailable (no patch content returned).");
@@ -260,7 +277,7 @@ Return ONLY valid JSON matching this schema (no markdown, no code fences, no ext
   "issues": Array<{
     "title": string,
     "severity": "critical"|"high"|"medium"|"low",
-    "category": "security"|"correctness"|"performance"|"maintainability"|"style"|"testing"|"documentation",
+    "category": "security"|"correctness"|"performance"|"maintainability"|"style"|"testing"|"documentation"|"policy-violation",
     "file": string|null,
     "line": number|null,
     "explanation": string,
@@ -268,11 +285,12 @@ Return ONLY valid JSON matching this schema (no markdown, no code fences, no ext
   }>,
   "praise": string[]
 }
-
+${policySection}
 Guidance:
 - Prefer fewer, higher-signal issues; max 20 issues.
 - If you reference a line, approximate based on the diff hunk; otherwise use null.
 - Focus on security, correctness, complexity spikes, and maintainability.
+- If organizational policies are defined above, you MUST check for compliance and flag violations.
 
 Scoring rubric (0-100):
 - 90-100: Excellent, low-risk, well-tested and well-scoped.
@@ -285,6 +303,7 @@ IMPORTANT:
 - It is OK to give an overallScore of 0.
 - If the change is irrelevant to the repo goal (e.g., README changed to unrelated content), treat it as unacceptable: set overallScore to 0-10, include at least one HIGH/CRITICAL issue explaining why, and make the summary a clear warning.
 - Do NOT invent praise. If there are no genuine positives, return an empty "praise" array. For low-quality PRs (overallScore < 40), prefer an empty "praise" array.
+- Policy violations are serious: flag them with the severity specified in the policy rules.
 
 PR Title: ${pr.title}
 PR Author: ${pr.user?.login || "unknown"}
