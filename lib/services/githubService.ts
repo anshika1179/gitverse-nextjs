@@ -383,6 +383,63 @@ export class GitHubService {
   }
 
   /**
+   * Create a new GitHub Check Run
+   */
+  async createCheckRun(
+    owner: string,
+    repo: string,
+    name: string,
+    head_sha: string,
+    status: "queued" | "in_progress" | "completed" = "in_progress"
+  ): Promise<{ id: number; status: string }> {
+    try {
+      const response = await this.client.post(
+        `/repos/${owner}/${repo}/check-runs`,
+        {
+          name,
+          head_sha,
+          status,
+          started_at: new Date().toISOString(),
+        }
+      );
+      return response.data;
+    } catch (error) {
+      throw sanitizeGitHubError(error);
+    }
+  }
+
+  /**
+   * Update an existing GitHub Check Run
+   */
+  async updateCheckRun(
+    owner: string,
+    repo: string,
+    check_run_id: number,
+    status: "queued" | "in_progress" | "completed",
+    conclusion?: "success" | "failure" | "neutral" | "cancelled" | "timed_out" | "action_required" | "skipped",
+    output?: {
+      title: string;
+      summary: string;
+      text?: string;
+    }
+  ): Promise<any> {
+    try {
+      const payload: any = { status };
+      if (conclusion) payload.conclusion = conclusion;
+      if (output) payload.output = output;
+      if (status === "completed") payload.completed_at = new Date().toISOString();
+
+      const response = await this.client.patch(
+        `/repos/${owner}/${repo}/check-runs/${check_run_id}`,
+        payload
+      );
+      return response.data;
+    } catch (error) {
+      throw sanitizeGitHubError(error);
+    }
+  }
+
+  /**
    * Post a comment on a pull request (PR comments are issue comments in GitHub API)
    */
   async postPullRequestComment(
