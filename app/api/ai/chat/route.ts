@@ -12,6 +12,7 @@ import {
   validateContentType,
   AI_REQUEST_LIMITS,
 } from "@/lib/utils/aiRequestValidation";
+import { orgRagIndex } from "@/lib/services/org-rag-index";
 
 // Allowed roles in the conversation history
 const ALLOWED_MESSAGE_ROLES = new Set(["user", "model", "assistant"]);
@@ -192,7 +193,7 @@ Do not include any Markdown formatting like \`\`\`json, explanation, or extra ch
         const selectionResult = await gemini.chatRaw(fileSelectionPrompt);
         let selectedPaths: string[] = [];
         try {
-          const cleanedJson = selectionResult.replace(/```json|```/g, "").trim();
+          const cleanedJson = selectionResult.text.replace(/```json|```/g, "").trim();
           selectedPaths = JSON.parse(cleanedJson);
         } catch {
           selectedPaths = candidatePaths.slice(0, 2);
@@ -218,6 +219,20 @@ Do not include any Markdown formatting like \`\`\`json, explanation, or extra ch
             .map(f => `File: ${f.path}\nContent:\n\`\`\`\n${f.content}\n\`\`\`\n`)
             .join("\n");
         }
+        
+        // Add cross-repository context
+        try {
+          const repoUrl = (repository as any).url || "";
+          const parsedUrl = GitHubService.parseGitHubUrl(repoUrl);
+          const repoIdentifier = parsedUrl ? `${parsedUrl.owner}/${parsedUrl.repo}` : repository.name;
+          const crossRepoContext = await orgRagIndex.retrieveCrossRepositoryContext(repoIdentifier, question, 2);
+          if (crossRepoContext.length > 0) {
+            retrievedFilesContent += "\n\n--- CROSS-REPOSITORY CONTEXT ---\n" + crossRepoContext.join("\n\n");
+          }
+        } catch (crossRepoErr) {
+          console.warn("Failed to retrieve cross-repo context:", crossRepoErr);
+        }
+
       } catch (err) {
         console.error("RAG codebase retrieval error:", err);
       }
@@ -242,7 +257,8 @@ User Question: ${question}
 `;
 
     // Invoke Gemini with history and grounded context
-    const response = await getGeminiService().chatRaw(enhancedPrompt, standardizedHistory);
+    const chatResult = await getGeminiService().chatRaw(enhancedPrompt, standardizedHistory);
+    const response = chatResult.text;
 
     void logAiRequest({
       userId: user.userId,
