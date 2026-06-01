@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2, X, Minimize2, Maximize2, Sparkles } from "lucide-react";
-import { Card } from "@/components/ui";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import { Card, CopyToClipboard } from "@/components/ui";
 import { geminiService, ChatMessage } from "@/services/gemini";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,6 +28,7 @@ export interface RepositoryBranch {
 
 interface AIRepositoryOverlayProps {
   repository: {
+    id?: number | string;
     name: string;
     description?: string;
     languages: { name: string; percentage: number }[];
@@ -201,7 +205,11 @@ User Question: ${input}`;
       }
 
       let fullResponse = "";
-      const stream = geminiService.chatStream(contextualPrompt);
+      const stream = geminiService.chatStream(contextualPrompt, {
+        id: repository.id ? Number(repository.id) : undefined,
+        name: repository.name,
+        languages: repository.languages?.map(l => l.name) || [],
+      });
 
       for await (const chunk of stream) {
         fullResponse += chunk;
@@ -229,28 +237,81 @@ User Question: ${input}`;
     }
   };
 
-  const formatMessage = (content: string) => {
-    return content.split("\n").map((line, i) => {
-      // Bold text
-      line = line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-      // Inline code
-      line = line.replace(
-        /`(.*?)`/g,
-        '<code class="bg-white/5 px-1 py-0.5 rounded text-sm">$1</code>'
-      );
-      // Bullet points
-      if (line.trim().startsWith("- ")) {
-        line = '<span class="inline-block mr-2">•</span>' + line.substring(2);
-      }
-      return (
-        <div
-          key={i}
-          dangerouslySetInnerHTML={{ __html: line }}
-          className="leading-relaxed"
-        />
-      );
-    });
+  const chatMarkdownSchema = {
+    ...defaultSchema,
+    attributes: {
+      ...defaultSchema.attributes,
+      code: [...(defaultSchema.attributes?.code || []), "className"],
+      span: [...(defaultSchema.attributes?.span || []), "className"],
+    },
   };
+
+  function ChatMarkdown({ content }: { content: string }) {
+    return (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[[rehypeSanitize, chatMarkdownSchema]]}
+        components={{
+          p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+          a: ({ href, children, ...props }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent underline underline-offset-4"
+              {...props}
+            >
+              {children}
+            </a>
+          ),
+          ul: ({ children }) => (
+            <ul className="list-disc pl-5 space-y-1 my-2">{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal pl-5 space-y-1 my-2">{children}</ol>
+          ),
+          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+          pre: ({ children }) => <>{children}</>,
+          code: ({ className, children, ...props }) => {
+            const text = String(children ?? "");
+            const isBlock =
+              (typeof className === "string" &&
+                className.includes("hljs")) ||
+              text.includes("\n");
+            if (isBlock) {
+              const codeString = text.replace(/\n$/, "");
+              return (
+                <div className="relative group my-2">
+                  <pre className="bg-white/5 rounded-lg p-3 overflow-x-auto">
+                    <code className="text-sm font-mono" {...props}>
+                      {children}
+                    </code>
+                  </pre>
+                  <CopyToClipboard
+                    text={codeString}
+                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                  />
+                </div>
+              );
+            }
+            return (
+              <code className="bg-white/5 px-1 py-0.5 rounded text-sm font-mono" {...props}>
+                {children}
+              </code>
+            );
+          },
+        }}
+        urlTransform={(url) => {
+          if (url.startsWith("javascript:") || url.startsWith("data:") || url.startsWith("vbscript:")) {
+            return "";
+          }
+          return url;
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    );
+  }
 
   if (!isOpen) {
     return (
@@ -326,7 +387,7 @@ User Question: ${input}`;
                     }`}
                   >
                     <div className="text-sm">
-                      {formatMessage(message.content)}
+                      <ChatMarkdown content={message.content} />
                     </div>
                   </div>
                 </div>
@@ -339,7 +400,7 @@ User Question: ${input}`;
                   </div>
                   <div className="rounded-lg px-4 py-2 max-w-[85%] glass border border-white/10">
                     <div className="text-sm">
-                      {formatMessage(streamingMessage)}
+                      <ChatMarkdown content={streamingMessage} />
                     </div>
                   </div>
                 </div>
@@ -380,7 +441,11 @@ User Question: ${input}`;
                   disabled={isLoading || !input.trim()}
                   className="bg-gradient-to-r from-primary to-accent text-white rounded-lg px-4 py-2 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Send className="w-4 h-4" />
+                  {isLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
                 </button>
               </div>
             </form>

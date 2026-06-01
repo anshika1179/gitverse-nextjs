@@ -11,7 +11,8 @@ import { CommitHistory } from "@/components/repository/CommitHistory";
 import { Contributors } from "@/components/repository/Contributors";
 import { RepositoryInsights } from "@/components/repository/RepositoryInsights";
 import { RepositoryMentorTab } from "@/components/ai/RepositoryMentorTab";
-import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { AIRepositoryOverlay } from "@/components/ai/AIRepositoryOverlay";
+
 import {
   Home,
   FolderTree,
@@ -120,10 +121,12 @@ export default function RepositoryAnalysis() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pollingStartedAt = useRef<number | null>(null);
   const pollingJobRef = useRef<string | null>(null);
 
   useEffect(() => {
     fetchRepository();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   useEffect(() => {
@@ -176,6 +179,7 @@ export default function RepositoryAnalysis() {
     return () => {
       stopped = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repository?.status, repository?.latestJob?.id, job?.id, job?.status]);
 
   const fetchRepository = async () => {
@@ -201,9 +205,19 @@ export default function RepositoryAnalysis() {
           setError(response.data.latestJob.error || "Analysis failed. Please try again later.");
         }
       }
-      console.log("Repository data:", response.data);
+      setLoading(false);
     } catch (err: any) {
       console.error("Error fetching repository:", err);
+
+      const isColdStart = err.response?.data?.error === "DATABASE_COLD_START";
+      
+      if (isColdStart) {
+        setError("Waking up database... Please wait.");
+        // Auto-retry in 3 seconds. Do not set loading to false so spinner stays.
+        setTimeout(fetchRepository, 3000);
+        return;
+      }
+
       setError(
         err.response?.data?.error ||
           err.response?.data?.message ||
@@ -215,7 +229,6 @@ export default function RepositoryAnalysis() {
         description: err.response?.data?.error || err.response?.data?.message || err.message || "Failed to load repository data.",
         variant: "destructive",
       });
-    } finally {
       setLoading(false);
     }
   };
@@ -241,21 +254,30 @@ export default function RepositoryAnalysis() {
       }
 
       if (nextJob?.status === "FAILED") {
-        setError(nextJob?.error || "Analysis failed. Please try again later.");
+        const msg = nextJob?.error || "The repository analysis failed.";
+
+        setError(msg);
+
+        pollingStartedAt.current = null;
+        setIsAnalyzing(false);
         toast({
           title: "Analysis failed",
-          description: nextJob?.error || nextJob?.progressMessage || "The repository analysis encountered an unexpected error.",
+          description: msg,
           variant: "destructive",
         });
       }
     } catch (err: any) {
       console.error("Error fetching analysis job:", err);
-      setError(
-        err.response?.data?.error ||
-          err.response?.data?.message ||
-          err.message ||
-          "Failed to connect to the analysis service."
-      );
+      
+      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || "Failed to connect to the analysis service.";
+      
+      // 1. Surface inline error state
+      setError(errorMessage);
+      
+      // 2. Stop polling
+      setIsAnalyzing(false);
+
+      // 3. Show a one-time toast notification
       toast({
         title: "Error checking analysis status",
         description: err.response?.data?.error || err.response?.data?.message || err.message || "Failed to connect to the analysis service.",
@@ -526,6 +548,28 @@ export default function RepositoryAnalysis() {
           </div>
         </Modal>
       </div>
+      {/* Floating AI Chat Overlay with Global Codebase RAG */}
+      {repository && (
+        <AIRepositoryOverlay
+          repository={{
+            id: repository.id,
+            name: repository.name,
+            description: repository.description,
+            languages: repository.languages || [],
+            stats: {
+              commits: repository.commits?.length || 0,
+              contributors: repository.contributors?.length || 0,
+              files: repository.files?.length || 0,
+              branches: repository.branches?.length || 0,
+              stars: repository.stars || 0,
+              forks: repository.forks || 0,
+            },
+            recentCommits: repository.commits || [],
+            contributors: repository.contributors || [],
+            branches: repository.branches || [],
+          }}
+        />
+      )}
     </DashboardLayout>
   );
 }

@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from "react";
+import * as htmlToImage from "html-to-image";
 import * as d3 from "d3";
-import { Card, EmptyState } from "@/components/ui";
-import { Network } from "lucide-react";
+import { Card } from "@/components/ui";
 import { GraphAnalyzer } from "@/utils/graphAnalyzer";
+import { MapControls } from "./MapControls";
+import { toast } from "sonner";
 
+interface RepositoryFile {
+  path: string;
+  lines?: number;
+}
 
+interface Repository {
+  files?: RepositoryFile[];
+}
 
 interface CodeDependencyGraphProps {
   repository?: any;
@@ -13,20 +22,59 @@ interface CodeDependencyGraphProps {
 export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  const zoomRef = useRef<any>(null);
+  const svgSelectionRef = useRef<any>(null);
+  const [isExporting, setIsExporting] = useState(false);
   
-  const [selectedNode, setSelectedNode] = useState<any>(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-
   const graphAnalyzer = new GraphAnalyzer();
   const graphData = graphAnalyzer.buildDependencyGraph(repository?.files || []);
 
-  const graphAnalyzer = new GraphAnalyzer();
-  const graphData = graphAnalyzer.buildDependencyGraph(repository?.files || []);
+  const exportGraph = async (format: "png" | "svg") => {
+    if (!exportRef.current) return;
+
+    setIsExporting(true);
+    const toastId = toast.loading(`Exporting graph as ${format.toUpperCase()}...`);
+    
+    try {
+      // Create options for higher resolution output, especially for PNG
+      const options = {
+        backgroundColor: "#0f172a", // Dark background to match the theme
+        pixelRatio: 3, // High DPI for crisp text
+        cacheBust: true,
+        style: {
+          margin: "0",
+          borderRadius: "0",
+          boxShadow: "none"
+        }
+      };
+
+      // We wait a tiny bit to ensure React state has flushed (e.g. MapControls is hidden if we chose to hide them, though we exclude them by not wrapping them in exportRef)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const dataUrl =
+        format === "png"
+          ? await htmlToImage.toPng(exportRef.current, options)
+          : await htmlToImage.toSvg(exportRef.current, options);
+
+      const link = document.createElement("a");
+      const repoName = repository?.name ? `-${repository.name}` : "";
+      link.download = `gitverse${repoName}-map.${format}`;
+      link.href = dataUrl;
+      link.click();
+      
+      toast.success(`Graph exported successfully!`, { id: toastId });
+    } catch (error) {
+      console.error("Export failed:", error);
+      toast.error("Failed to export the graph. Please try again.", { id: toastId });
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   useEffect(() => {
     if (!svgRef.current) return;
-
-    const graphData = generateDependencyGraph(repository);
 
     // If no data, show empty state
     if (graphData.nodes.length === 0) {
@@ -77,13 +125,13 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
           .forceLink(links)
           .id((d: any) => d.id)
           .distance(100)
-          .strength((d: any) => d.strength * 0.5)
+          .strength((d: any) => d.strength * 0.5),
       )
       .force("charge", d3.forceManyBody().strength(-300))
       .force("center", d3.forceCenter(width / 2, height / 2))
       .force(
         "collision",
-        d3.forceCollide().radius((d: any) => d.size / 2 + 10)
+        d3.forceCollide().radius((d: any) => d.size / 2 + 10),
       );
 
     // Draw links
@@ -92,9 +140,11 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
       .selectAll("line")
       .data(links)
       .join("line")
-      .attr("stroke", (d: any) => d.isCyclic ? "#ef4444" : "rgba(255,255,255,0.2)")
+      .attr("stroke", (d: any) =>
+        d.isCyclic ? "#ef4444" : "rgba(255,255,255,0.2)",
+      )
       .attr("stroke-width", (d: any) => d.strength * 2)
-      .attr("stroke-dasharray", (d: any) => d.isCyclic ? "5,5" : "none")
+      .attr("stroke-dasharray", (d: any) => (d.isCyclic ? "5,5" : "none"))
       .attr("stroke-opacity", 0.6);
 
     // Draw nodes
@@ -120,11 +170,7 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
             if (!d.active) simulation.alphaTarget(0);
             d.fx = null;
             d.fy = null;
-          })
-          .on("click", (_event: any, d: any) => {
-             // Let user click a node to view its AI summary
-             setSelectedNode(d);
-          })
+          }),
       );
 
     // Node circles
@@ -149,10 +195,10 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
           .attr("stroke", (l: any) =>
             l.source.id === d.id || l.target.id === d.id
               ? typeColors[d.type]
-              : "rgba(255,255,255,0.1)"
+              : "rgba(255,255,255,0.1)",
           )
           .attr("stroke-opacity", (l: any) =>
-            l.source.id === d.id || l.target.id === d.id ? 1 : 0.2
+            l.source.id === d.id || l.target.id === d.id ? 1 : 0.2,
           );
 
         if (tooltipRef.current) {
@@ -195,7 +241,9 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
         link
           .transition()
           .duration(200)
-          .attr("stroke", (l: any) => l.isCyclic ? "#ef4444" : "rgba(255,255,255,0.2)")
+          .attr("stroke", (l: any) =>
+            l.isCyclic ? "#ef4444" : "rgba(255,255,255,0.2)",
+          )
           .attr("stroke-opacity", 0.6);
 
         if (tooltipRef.current) {
@@ -207,7 +255,7 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
     node
       .append("text")
       .text((d: any) =>
-        d.name.length > 15 ? d.name.slice(0, 12) + "..." : d.name
+        d.name.length > 15 ? d.name.slice(0, 12) + "..." : d.name,
       )
       .attr("font-size", "10px")
       .attr("dx", 0)
@@ -251,86 +299,103 @@ export function CodeDependencyGraph({ repository }: CodeDependencyGraphProps) {
     };
   }, [repository]);
 
+  const handleZoomIn = () => {
+    if (svgRef.current) {
+      d3.select(svgRef.current).transition().call(d3.zoom().scaleBy as any, 1.2);
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (svgRef.current) {
+      d3.select(svgRef.current).transition().call(d3.zoom().scaleBy as any, 0.8);
+    }
+  };
+
+  const handleReset = () => {
+    if (svgRef.current) {
+      d3.select(svgRef.current).transition().call(d3.zoom().transform as any, d3.zoomIdentity);
+    }
+  };
+
   return (
     <div className="relative">
-    <Card className="glass p-4 sm:p-6 overflow-hidden">
-      <div className="mb-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-        <div>
-          <h3 className="text-base sm:text-lg font-semibold">
-            Code Dependency Graph
-          </h3>
-          <p className="text-xs sm:text-sm text-muted-foreground">
-            Interactive visualization of file dependencies and relationships
-          </p>
-        </div>
-        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4 text-xs">
-          <div className="flex gap-3">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-purple-500 flex-shrink-0" />
-              <span>Folders</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0" />
-              <span>Files</span>
+      <Card className="glass p-4 sm:p-6 overflow-hidden">
+        <div className="mb-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <h3 className="text-base sm:text-lg font-semibold">
+              Code Dependency Graph
+            </h3>
+            <p className="text-xs sm:text-sm text-muted-foreground">
+              Interactive visualization of file dependencies and relationships
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4 text-xs">
+            <div className="flex gap-3">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-purple-500 flex-shrink-0" />
+                <span>Folders</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-blue-500 flex-shrink-0" />
+                <span>Files</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-      <div className="glass rounded-lg p-4 sm:p-6">
-        <h3 className="text-base sm:text-lg font-semibold mb-4">
-          Code Dependencies
-        </h3>
-        <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
-          <svg
-            ref={svgRef}
-            width="100%"
-            height="auto"
-            className="text-foreground min-h-96 sm:min-h-96"
-            style={{ background: "rgba(0,0,0,0.2)", minHeight: "300px" }}
-            viewBox="0 0 900 600"
-            preserveAspectRatio="xMidYMid meet"
+
+        <div className="relative">
+          <div
+            ref={exportRef}
+            className="glass rounded-lg p-4 sm:p-6 relative overflow-visible"
+          >
+            <h3 className="text-base sm:text-lg font-semibold mb-4 text-white">
+              Code Dependencies
+            </h3>
+            <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+              <svg
+                ref={svgRef}
+                width="100%"
+                height="auto"
+                className="text-white min-h-96 sm:min-h-96"
+                style={{ background: "rgba(0,0,0,0.2)", minHeight: "300px" }}
+                viewBox="0 0 900 600"
+                preserveAspectRatio="xMidYMid meet"
+              />
+            </div>
+            <div className="absolute bottom-2 right-3 text-[10px] text-white/70">
+              GitVerse • {repository?.name || "Repository"}
+            </div>
+          </div>
+
+          <MapControls 
+            onZoomIn={handleZoomIn} 
+            onZoomOut={handleZoomOut} 
+            onReset={handleReset} 
+            onExportPng={() => exportGraph("png")}
+            onExportSvg={() => exportGraph("svg")}
+            isExporting={isExporting}
           />
         </div>
-      </div>
-      <p className="text-xs text-muted-foreground mt-2 px-4 sm:px-0">
-        💡 Drag nodes to reposition • Scroll to zoom • Hover for details
-      </p>
-      <div
-  ref={tooltipRef}
-  className="
-    fixed p-3 rounded-lg pointer-events-none shadow-xl border
-    translate-x-[-120px] translate-y-[-120px]
-    sm:translate-x-[-250px] sm:translate-y-[-250px]
-  "
-  style={{
-    opacity: 1, // control with state later
-    backgroundColor: "rgba(0, 0, 0, 0.9)",
-    color: "white",
-    zIndex: 9999,
-    backdropFilter: "blur(8px)",
-    left: "0px",
-    top: "0px",
-    whiteSpace: "nowrap",
-  }}
-/>
 
-    </Card>
+        <p className="text-xs text-muted-foreground mt-2 px-4 sm:px-0">
+          💡 Drag nodes to reposition • Scroll to zoom • Hover for details
+        </p>
 
-    {selectedNode && (
-      <ModuleSummaryPanel
-        nodeId={selectedNode.id}
-        nodeName={selectedNode.name}
-        nodeType={selectedNode.type}
-        repositoryFiles={repository?.files || []}
-        onClose={() => setSelectedNode(null)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-      />
-    )}
-
-    <AISettingsModal 
-      isOpen={isSettingsOpen} 
-      onClose={() => setIsSettingsOpen(false)} 
-    />
+        <div
+          ref={tooltipRef}
+          className="fixed p-3 rounded-lg pointer-events-none shadow-xl border translate-x-[-120px] translate-y-[-120px] sm:translate-x-[-250px] sm:translate-y-[-250px]"
+          style={{
+            opacity: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.9)",
+            color: "white",
+            zIndex: 9999,
+            backdropFilter: "blur(8px)",
+            left: "0px",
+            top: "0px",
+            whiteSpace: "nowrap",
+          }}
+        />
+      </Card>
     </div>
   );
 }
