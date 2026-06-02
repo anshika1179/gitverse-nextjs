@@ -68,10 +68,10 @@ export function useRepositories({ limit = DEFAULT_LIMIT } = {}): UseRepositories
             Authorization: `Bearer ${token}`,
           },
         });
+        // apiSuccess wraps response in { error, data: { repositories, nextCursor, hasMore } }
+        const { repositories, nextCursor: newCursor, hasMore: newHasMore } = response.data.data || {};
 
-        const { data, nextCursor, hasMore: newHasMore } = response.data;
-
-        const newRepos = Array.isArray(data) ? data : [];
+        const newRepos = Array.isArray(repositories) ? repositories : [];
 
         setRepos((prev) => {
           if (!isLoadMore) return newRepos;
@@ -82,7 +82,7 @@ export function useRepositories({ limit = DEFAULT_LIMIT } = {}): UseRepositories
           return [...prev, ...filtered];
         });
 
-        setCursor(nextCursor);
+        setCursor(newCursor);
         setHasMore(newHasMore);
       } catch (err: any) {
         if (err.name !== "CanceledError" && err.name !== "AbortError") {
