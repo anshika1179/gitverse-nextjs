@@ -78,10 +78,10 @@ export function useRepositories({ limit = DEFAULT_LIMIT } = {}): UseRepositories
           },
           signal: controller.signal,
         });
+        // apiSuccess wraps response in { error, data: { repositories, nextCursor, hasMore } }
+        const { repositories, nextCursor: newCursor, hasMore: newHasMore } = response.data.data || {};
 
-        const { data, nextCursor, hasMore: newHasMore } = response.data;
-
-        const newRepos = Array.isArray(data) ? data : [];
+        const newRepos = Array.isArray(repositories) ? repositories : [];
 
         setRepos((prev) => {
           if (!isLoadMore) return newRepos;
@@ -92,6 +92,7 @@ export function useRepositories({ limit = DEFAULT_LIMIT } = {}): UseRepositories
           return [...prev, ...filtered];
         });
 
+        setCursor(newCursor);
         cursorRef.current = nextCursor;
         setHasMore(newHasMore);
       } catch (err: any) {
