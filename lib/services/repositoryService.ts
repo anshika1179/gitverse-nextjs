@@ -9,7 +9,13 @@ import { FileChangeType } from "@prisma/client";
 import { repoSyncLimiter } from "../utils/concurrencyLimiter";
 import { withDbRetry } from "../utils/dbRetry";
 
-function yieldIfHighMemory(threshold = 0.7): Promise<void> {
+function yieldIfHighMemory(threshold?: number): Promise<void> {
+  if (threshold === undefined) {
+    const envThreshold = process.env.GITVERSE_MEM_YIELD_THRESHOLD;
+    threshold = envThreshold ? parseFloat(envThreshold) : 0.7;
+    if (isNaN(threshold)) threshold = 0.7;
+  }
+
   const usage = process.memoryUsage();
   if (usage.heapUsed / usage.heapTotal > threshold) {
     return new Promise((resolve) => setImmediate(resolve));
@@ -100,6 +106,13 @@ export class RepositoryService {
     let gitService: GitService | null = null;
 
     try {
+      // Check repository size before cloning
+      const MAX_REPO_SIZE = 500 * 1024 * 1024; // 500 MB limit
+      const remoteSize = await GitService.getRemoteRepositorySize(repository.url);
+      if (remoteSize !== null && remoteSize > MAX_REPO_SIZE) {
+        throw new Error(`Repository exceeds maximum allowed size of 500MB (${(remoteSize / 1024 / 1024).toFixed(2)}MB).`);
+      }
+
       // For README we don't need all branches; keep it lightweight.
       gitService = await GitService.cloneRepository(repository.url, tempDir, {
         depth: 1,
@@ -236,6 +249,13 @@ if (existingRepositoryName) {
 
     try {
       checkAborted();
+
+      // Check repository size before cloning to prevent disk exhaustion DoS
+      const MAX_REPO_SIZE = 500 * 1024 * 1024; // 500 MB limit
+      const remoteSize = await GitService.getRemoteRepositorySize(repository.url);
+      if (remoteSize !== null && remoteSize > MAX_REPO_SIZE) {
+        throw new Error(`Repository exceeds maximum allowed size of 500MB (${(remoteSize / 1024 / 1024).toFixed(2)}MB).`);
+      }
 
       // Clone repository
       await report({
@@ -592,8 +612,8 @@ if (existingRepositoryName) {
   async getRepository(id: number, userId: number) {
     const repository = await prisma.repository.findFirst({
       where: {
-        id,
-        userId,
+        id: Number(id),
+        userId: Number(userId),
       },
       include: {
         branches: {

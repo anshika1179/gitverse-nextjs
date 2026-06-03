@@ -1,13 +1,15 @@
 import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
+import { getGeminiAnalysisCache, setGeminiAnalysisCache, hashGeminiPromptSeed } from "./geminiAnalysisCacheService";
 
 export interface AIAnalysisRequest {
   repositoryId: number;
   type:
-    | "overview"
-    | "code-quality"
-    | "security"
-    | "architecture"
-    | "suggestions";
+  | "overview"
+  | "code-quality"
+  | "security"
+  | "architecture"
+  | "suggestions"
+  | "architecture-document";
   context?: {
     files?: Array<{ path: string; content: string }>;
     fileTree?: string;
@@ -28,6 +30,8 @@ export interface AICodeAnalysisRequest {
   language: string;
   analysisType: "explain" | "improve" | "bugs" | "document" | "refactor";
   context?: string;
+  repositoryId?: number;
+  commitHash?: string;
 }
 
 export interface AIRepositoryChatRequest {
@@ -94,7 +98,7 @@ export class GeminiService {
    * Analyze code snippet
    */
   async analyzeCode(request: AICodeAnalysisRequest): Promise<string> {
-    const { code, language, analysisType, context } = request;
+    const { code, language, analysisType, context, repositoryId, commitHash } = request;
 
     let prompt = this.buildCodeAnalysisPrompt(
       code,
@@ -102,11 +106,38 @@ export class GeminiService {
       analysisType,
       context,
     );
+    
+    // Check cache if we have repository context
+    let promptHash: string | undefined;
+    if (repositoryId && commitHash) {
+      promptHash = hashGeminiPromptSeed({ code, language, analysisType, context });
+      const cached = await getGeminiAnalysisCache({
+        repositoryId,
+        commitHash,
+        analysisType: `code-${analysisType}`,
+        promptHash,
+      });
+      if (cached.hit && cached.result) {
+        return cached.result;
+      }
+    }
 
     try {
       const result = await this.model.generateContent(prompt);
       const response = await result.response;
-      return response.text();
+      const text = response.text();
+      
+      // Save to cache
+      if (repositoryId && commitHash && promptHash) {
+        await setGeminiAnalysisCache({
+          repositoryId,
+          commitHash,
+          analysisType: `code-${analysisType}`,
+          promptHash,
+        }, text, { model: "gemini-2.5-flash" });
+      }
+      
+      return text;
     } catch (error: any) {
       console.error("Gemini analysis error:", error);
 
@@ -244,12 +275,12 @@ Provide only the commit messages, one per line.
         .filter((line) => line.trim())
         .slice(0, 3);
     } catch (error: any) {
-  console.error("Commit message suggestion error:", error);
+      console.error("Commit message suggestion error:", error);
 
-  throw new Error(
-    error?.message || "Failed to generate commit message suggestions"
-  );
-}
+      throw new Error(
+        error?.message || "Failed to generate commit message suggestions"
+      );
+    }
   }
 
   /**
@@ -347,6 +378,29 @@ Provide improvement suggestions:
 5. Technology upgrade recommendations
 
 Prioritize by impact and effort.`;
+
+      case "architecture-document":
+        return `${baseContext}${scopeNote}
+
+You are an expert software architect analyzing an established codebase. Based on the provided repository context, generate a comprehensive ARCHITECTURE.md file. Use Markdown formatting. Ensure your response is strictly the Markdown content.
+
+# Architecture Overview
+[Provide a high level summary of the application's core functionality and its primary architectural pattern.]
+
+## Core Modules
+[Based on the file structure, identify 3-5 of the most crucial modules/components. Describe their primary responsibilities.]
+
+## Dependencies
+[Identify primary external dependencies, runtimes, and frameworks based on the context. Explain their role within the stack.]
+
+## Data Flow
+[Conceptually map how data traverses the application between the recognized components.]
+
+## Risks
+[List potential technical debt, scalability bottlenecks, or security concerns given the tech stack and complexity.]
+
+## Contributor Notes
+[Provide guidelines, gotchas, or important notes for new developers joining the codebase.]`;
 
       default:
         return `${fullContext}\n\nAnalyze this repository and provide insights.`;

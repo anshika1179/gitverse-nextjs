@@ -260,6 +260,14 @@ if ((googleClientId || googleClientSecret) && !isGoogleConfigured) {
 
 // NextAuth secret is resolved lazily at runtime
 
+if (process.env.NODE_ENV === "production" && !process.env.NEXTAUTH_URL) {
+  console.warn(
+    "[auth][warning] NEXTAUTH_URL environment variable is not set in production. " +
+    "This will likely cause Google OAuth 'redirect_uri_mismatch' errors because the " +
+    "callback URL cannot be reliably inferred. Please set NEXTAUTH_URL to your exact production domain (e.g., https://yourdomain.com)."
+  );
+}
+
 export const authOptions: NextAuthOptions = {
   debug: process.env.NEXTAUTH_DEBUG === "true",
   logger: {
