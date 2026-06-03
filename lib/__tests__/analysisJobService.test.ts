@@ -14,6 +14,7 @@ jest.mock("../../lib/prisma", () => ({
       create: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
+      count: jest.fn(),
     },
   }),
 }));
@@ -67,7 +68,7 @@ function jobFixture(overrides: Partial<any> = {}) {
 }
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  jest.resetAllMocks();
   // Default $transaction implementation: invoke the callback with a tx object
   // that proxies calls through to the same mockPrisma (mimicking Prisma's
   // real behaviour where `tx` exposes the same model surface as `prisma`).
@@ -75,6 +76,10 @@ beforeEach(() => {
     async (callback: (tx: typeof mockPrisma) => Promise<unknown>) =>
       callback(mockPrisma),
   );
+  // Default: reclaimOrphanedJobs finds no stuck jobs
+  asMock(mockPrisma.analysisJob.updateMany).mockResolvedValue({ count: 0 });
+  // Default: countOrphanedJobs finds nothing
+  asMock(mockPrisma.analysisJob.count).mockResolvedValue(0);
 });
 
 describe("AnalysisJobService – claimNextJob atomicity", () => {
@@ -764,6 +769,250 @@ describe("AnalysisJobService – markFailed", () => {
   });
 });
 
+describe("AnalysisJobService – reclaimOrphanedJobs", () => {
+  let service: AnalysisJobService;
+
+  beforeEach(() => {
+    service = new AnalysisJobService();
+  });
+
+  it("requeues PROCESSING jobs whose lock has expired", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 3 });
+
+    const result = await service.reclaimOrphanedJobs();
+
+    expect(result).toBe(3);
+    expect(asMock(mockPrisma.analysisJob.updateMany)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: "PROCESSING",
+          lockExpiresAt: { lt: expect.any(Date) },
+        },
+        data: {
+          status: "QUEUED",
+          lockedAt: null,
+          lockedBy: null,
+          lockExpiresAt: null,
+          nextRunAt: expect.any(Date),
+          progressMessage: "Reclaimed after lock expiration",
+        },
+      }),
+    );
+  });
+
+  it("does not affect jobs with a valid (non-expired) lock", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 0 });
+
+    const result = await service.reclaimOrphanedJobs();
+
+    expect(result).toBe(0);
+    const call = asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0];
+    expect(call.where.lockExpiresAt).toEqual({ lt: expect.any(Date) });
+  });
+
+  it("does not affect DONE or FAILED jobs", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 0 });
+
+    await service.reclaimOrphanedJobs();
+
+    const call = asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0];
+    expect(call.where.status).toBe("PROCESSING");
+  });
+
+  it("returns 0 when no PROCESSING jobs exist", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 0 });
+
+    const result = await service.reclaimOrphanedJobs();
+
+    expect(result).toBe(0);
+  });
+
+  it("sets nextRunAt to now for immediate re-processing", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 1 });
+
+    const before = Date.now();
+    await service.reclaimOrphanedJobs();
+    const after = Date.now();
+
+    const call = asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0];
+    const nextRunAt: Date = call.data.nextRunAt;
+    expect(nextRunAt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(nextRunAt.getTime()).toBeLessThanOrEqual(after);
+  });
+});
+
+describe("AnalysisJobService – countOrphanedJobs", () => {
+  let service: AnalysisJobService;
+
+  beforeEach(() => {
+    service = new AnalysisJobService();
+  });
+
+  it("returns the count of PROCESSING jobs with expired locks", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(5);
+
+    const result = await service.countOrphanedJobs();
+
+    expect(result).toBe(5);
+    expect(asMock(mockPrisma.analysisJob.count)).toHaveBeenCalledWith({
+      where: {
+        status: "PROCESSING",
+        lockExpiresAt: { lt: expect.any(Date) },
+      },
+    });
+  });
+
+  it("filters by userId when provided", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(2);
+
+    const result = await service.countOrphanedJobs({ userId: 42 });
+
+    expect(result).toBe(2);
+    expect(asMock(mockPrisma.analysisJob.count)).toHaveBeenCalledWith({
+      where: {
+        status: "PROCESSING",
+        lockExpiresAt: { lt: expect.any(Date) },
+        userId: 42,
+      },
+    });
+  });
+
+  it("returns 0 when no orphaned jobs exist", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(0);
+
+    const result = await service.countOrphanedJobs();
+
+    expect(result).toBe(0);
+  });
+});
+
+describe("AnalysisJobService – getAnalysisStats", () => {
+  let service: AnalysisJobService;
+
+  beforeEach(() => {
+    service = new AnalysisJobService();
+  });
+
+  it("returns all job stats for a given user", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(10);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(2);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(3);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(4);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(1);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(1);
+
+    const result = await service.getAnalysisStats({ userId: 7 });
+
+    expect(result).toEqual({
+      total: 10,
+      processing: 2,
+      queued: 3,
+      done: 4,
+      failed: 1,
+      stuck: 1,
+    });
+  });
+
+  it("returns zero counts when user has no jobs", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(0);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(0);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(0);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(0);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(0);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(0);
+
+    const result = await service.getAnalysisStats({ userId: 99 });
+
+    expect(result).toEqual({
+      total: 0,
+      processing: 0,
+      queued: 0,
+      done: 0,
+      failed: 0,
+      stuck: 0,
+    });
+  });
+
+  it("uses Promise.all for parallel query execution", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(1);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(2);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(3);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(4);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(5);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(6);
+
+    await service.getAnalysisStats({ userId: 7 });
+
+    expect(asMock(mockPrisma.analysisJob.count)).toHaveBeenCalledTimes(6);
+  });
+
+  it("reports stuck jobs as a subset of processing jobs", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(10);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(3);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(2);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(4);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(1);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(1);
+
+    const result = await service.getAnalysisStats({ userId: 7 });
+
+    expect(result.stuck).toBeLessThanOrEqual(result.processing);
+  });
+});
+
+describe("AnalysisJobService – claimNextJob with orphan reclamation", () => {
+  let service: AnalysisJobService;
+
+  beforeEach(() => {
+    service = new AnalysisJobService();
+  });
+
+  it("calls reclaimOrphanedJobs before the CTE claim", async () => {
+    asMock(mockPrisma.$queryRaw).mockResolvedValueOnce([]);
+
+    await service.claimNextJob({ workerId: "worker-A" });
+
+    expect(asMock(mockPrisma.analysisJob.updateMany)).toHaveBeenCalledTimes(1);
+    expect(asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0].where.status).toBe("PROCESSING");
+  });
+
+  it("still returns null when no candidate exists after reclamation", async () => {
+    asMock(mockPrisma.$queryRaw).mockResolvedValueOnce([]);
+
+    const result = await service.claimNextJob({ workerId: "worker-A" });
+
+    expect(result).toBeNull();
+  });
+
+  it("claims a job after reclaiming orphaned jobs", async () => {
+    asMock(mockPrisma.$queryRaw).mockResolvedValueOnce([{ id: "job-1" }]);
+    asMock(mockPrisma.analysisJob.findUnique).mockResolvedValueOnce(
+      jobFixture({ id: "job-1", status: "PROCESSING" }),
+    );
+
+    const result = await service.claimNextJob({ workerId: "worker-A" });
+
+    expect(result).toBeTruthy();
+    expect(result?.id).toBe("job-1");
+  });
+
+  it("reclaims orphaned jobs before finding a candidate", async () => {
+    const reclaimSpy = jest.spyOn(service, "reclaimOrphanedJobs");
+    reclaimSpy.mockResolvedValueOnce(3);
+
+    asMock(mockPrisma.$queryRaw).mockResolvedValueOnce([{ id: "job-2" }]);
+    asMock(mockPrisma.analysisJob.findUnique).mockResolvedValueOnce(
+      jobFixture({ id: "job-2", status: "PROCESSING" }),
+    );
+
+    await service.claimNextJob({ workerId: "worker-A" });
+
+    expect(reclaimSpy).toHaveBeenCalled();
+    expect(asMock(mockPrisma.$queryRaw)).toHaveBeenCalled();
+    reclaimSpy.mockRestore();
+  });
+});
+
 describe("AnalysisJobService – cleanupStaleJobs", () => {
   let service: AnalysisJobService;
 
@@ -802,6 +1051,77 @@ describe("AnalysisJobService – cleanupStaleJobs", () => {
     const result = await service.cleanupStaleJobs();
 
     expect(result).toBe(0);
+  });
+
+  it("uses default 10-minute grace period when no argument is supplied", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 1 });
+
+    const before = Date.now();
+    await service.cleanupStaleJobs();
+    const after = Date.now();
+
+    const call = asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0];
+    const updatedAtThreshold: Date = call.where.updatedAt.lt;
+    expect(updatedAtThreshold.getTime()).toBeGreaterThanOrEqual(
+      Date.now() - 10 * 60 * 1000 - 2000,
+    );
+    expect(updatedAtThreshold.getTime()).toBeLessThanOrEqual(
+      Date.now() - 10 * 60 * 1000 + 2000,
+    );
+  });
+
+  it("honours a custom grace period", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 1 });
+
+    await service.cleanupStaleJobs(30 * 60 * 1000);
+
+    const call = asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0];
+    const updatedAtThreshold: Date = call.where.updatedAt.lt;
+    expect(updatedAtThreshold.getTime()).toBeGreaterThanOrEqual(
+      Date.now() - 30 * 60 * 1000 - 2000,
+    );
+    expect(updatedAtThreshold.getTime()).toBeLessThanOrEqual(
+      Date.now() - 30 * 60 * 1000 + 2000,
+    );
+  });
+
+  it("uses a short grace period for testing", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 1 });
+
+    await service.cleanupStaleJobs(1000);
+
+    const call = asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0];
+    const updatedAtThreshold: Date = call.where.updatedAt.lt;
+    expect(updatedAtThreshold.getTime()).toBeGreaterThanOrEqual(
+      Date.now() - 1000 - 500,
+    );
+    expect(updatedAtThreshold.getTime()).toBeLessThanOrEqual(
+      Date.now() - 1000 + 500,
+    );
+  });
+
+  it("clears lock fields on failed jobs", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 1 });
+
+    await service.cleanupStaleJobs();
+
+    const call = asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0];
+    expect(call.data.lockedAt).toBeNull();
+    expect(call.data.lockedBy).toBeNull();
+    expect(call.data.lockExpiresAt).toBeNull();
+  });
+
+  it("sets finishedAt on failed jobs", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 1 });
+
+    const before = Date.now();
+    await service.cleanupStaleJobs();
+    const after = Date.now();
+
+    const call = asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0];
+    const finishedAt: Date = call.data.finishedAt;
+    expect(finishedAt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(finishedAt.getTime()).toBeLessThanOrEqual(after);
   });
 });
 
@@ -865,10 +1185,253 @@ describe("AnalysisJobService – heartbeat", () => {
   });
 });
 
+describe("AnalysisJobService – reclaimOrphanedJobs empty edge cases", () => {
+  let service: AnalysisJobService;
+
+  beforeEach(() => {
+    service = new AnalysisJobService();
+  });
+
+  it("handles null lockExpiresAt gracefully (no-op)", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 0 });
+
+    const result = await service.reclaimOrphanedJobs();
+    expect(result).toBe(0);
+  });
+
+  it("handles database error during reclamation", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockRejectedValueOnce(
+      new Error("connection lost"),
+    );
+
+    await expect(service.reclaimOrphanedJobs()).rejects.toThrow("connection lost");
+  });
+
+  it("reclaims multiple orphaned jobs at once", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 15 });
+
+    const result = await service.reclaimOrphanedJobs();
+    expect(result).toBe(15);
+  });
+
+  it("does not reclaim jobs with null lockExpiresAt", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 0 });
+
+    await service.reclaimOrphanedJobs();
+
+    const call = asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0];
+    expect(call.where.status).toBe("PROCESSING");
+    expect(call.where.lockExpiresAt).toEqual({ lt: expect.any(Date) });
+  });
+});
+
+describe("AnalysisJobService – countOrphanedJobs edge cases", () => {
+  let service: AnalysisJobService;
+
+  beforeEach(() => {
+    service = new AnalysisJobService();
+  });
+
+  it("counts only PROCESSING jobs with expired locks", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(0);
+
+    await service.countOrphanedJobs();
+
+    const call = asMock(mockPrisma.analysisJob.count).mock.calls[0][0];
+    expect(call.where.status).toBe("PROCESSING");
+    expect(call.where.lockExpiresAt).toBeDefined();
+  });
+
+  it("handles database error during count", async () => {
+    asMock(mockPrisma.analysisJob.count).mockRejectedValueOnce(
+      new Error("database unavailable"),
+    );
+
+    await expect(service.countOrphanedJobs()).rejects.toThrow("database unavailable");
+  });
+
+  it("returns 0 when filter matches no records", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(0);
+
+    const result = await service.countOrphanedJobs({ userId: 9999 });
+    expect(result).toBe(0);
+  });
+});
+
+describe("AnalysisJobService – getAnalysisStats edge cases", () => {
+  let service: AnalysisJobService;
+
+  beforeEach(() => {
+    service = new AnalysisJobService();
+  });
+
+  it("handles database errors gracefully", async () => {
+    asMock(mockPrisma.analysisJob.count).mockRejectedValue(
+      new Error("query failed"),
+    );
+
+    await expect(service.getAnalysisStats({ userId: 1 })).rejects.toThrow(
+      "query failed",
+    );
+  });
+
+  it("stuck count never exceeds processing count", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(10);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(5);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(0);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(3);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(2);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(1);
+
+    const stats = await service.getAnalysisStats({ userId: 1 });
+    expect(stats.stuck).toBe(1);
+    expect(stats.stuck).toBeLessThanOrEqual(stats.processing);
+  });
+
+  it("returns consistent totals across all statuses", async () => {
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(20);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(3);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(7);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(8);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(2);
+    asMock(mockPrisma.analysisJob.count).mockResolvedValueOnce(1);
+
+    const stats = await service.getAnalysisStats({ userId: 1 });
+    const sum = stats.processing + stats.queued + stats.done + stats.failed;
+    expect(sum).toBe(stats.total);
+  });
+});
+
+describe("AnalysisJobService – cleanupStaleJobs edge cases", () => {
+  let service: AnalysisJobService;
+
+  beforeEach(() => {
+    service = new AnalysisJobService();
+  });
+
+  it("does not fail when no matching records exist", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 0 });
+
+    const result = await service.cleanupStaleJobs();
+    expect(result).toBe(0);
+  });
+
+  it("handles database errors", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockRejectedValueOnce(
+      new Error("db timeout"),
+    );
+
+    await expect(service.cleanupStaleJobs()).rejects.toThrow("db timeout");
+  });
+
+  it("zero grace period marks all expired-lock jobs as failed", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 5 });
+
+    const result = await service.cleanupStaleJobs(0);
+    expect(result).toBe(5);
+  });
+
+  it("marks jobs as failed with error message", async () => {
+    asMock(mockPrisma.analysisJob.updateMany).mockResolvedValueOnce({ count: 1 });
+
+    await service.cleanupStaleJobs();
+
+    const call = asMock(mockPrisma.analysisJob.updateMany).mock.calls[0][0];
+    expect(call.data.error).toContain("heartbeat");
+    expect(call.data.status).toBe("FAILED");
+  });
+});
+
+describe("AnalysisJobService – exports", () => {
+  it("exports a singleton instance", () => {
+    const { analysisJobService } = require("../services/analysisJobService");
+    expect(analysisJobService).toBeInstanceOf(AnalysisJobService);
+  });
+
+  it("exports the AnalysisJobService class", () => {
+    const { AnalysisJobService: Cls } = require("../services/analysisJobService");
+    expect(Cls).toBe(AnalysisJobService);
+  });
+
+  it("singleton has all expected methods", () => {
+    const { analysisJobService } = require("../services/analysisJobService");
+    expect(typeof analysisJobService.createRepositoryAnalysisJob).toBe("function");
+    expect(typeof analysisJobService.getJob).toBe("function");
+    expect(typeof analysisJobService.updateProgress).toBe("function");
+    expect(typeof analysisJobService.markDone).toBe("function");
+    expect(typeof analysisJobService.markFailed).toBe("function");
+    expect(typeof analysisJobService.claimNextJob).toBe("function");
+    expect(typeof analysisJobService.cleanupStaleJobs).toBe("function");
+    expect(typeof analysisJobService.heartbeat).toBe("function");
+    expect(typeof analysisJobService.reclaimOrphanedJobs).toBe("function");
+    expect(typeof analysisJobService.countOrphanedJobs).toBe("function");
+    expect(typeof analysisJobService.getAnalysisStats).toBe("function");
+  });
+
+  it("singleton methods are bound to the instance", () => {
+    const { analysisJobService: svc } = require("../services/analysisJobService");
+    const { reclaimOrphanedJobs, countOrphanedJobs, getAnalysisStats, cleanupStaleJobs } = svc;
+    expect(typeof reclaimOrphanedJobs).toBe("function");
+    expect(typeof countOrphanedJobs).toBe("function");
+    expect(typeof getAnalysisStats).toBe("function");
+    expect(typeof cleanupStaleJobs).toBe("function");
+  });
+});
+
+describe("AnalysisJobService – updateProgress edge cases", () => {
+  let service: AnalysisJobService;
+
+  beforeEach(() => {
+    service = new AnalysisJobService();
+  });
+
+  it("handles undefined progress fields", async () => {
+    asMock(mockPrisma.analysisJob.update).mockResolvedValueOnce({});
+
+    await service.updateProgress({
+      jobId: "job-1",
+      update: {},
+    });
+
+    const call = asMock(mockPrisma.analysisJob.update).mock.calls[0][0];
+    expect(call.data.progressPercent).toBeUndefined();
+    expect(call.data.progressMessage).toBeUndefined();
+  });
+
+  it("updates progress details via JSON field", async () => {
+    asMock(mockPrisma.analysisJob.update).mockResolvedValueOnce({});
+
+    const details = { currentStep: "cloning", filesFound: 42 };
+    await service.updateProgress({
+      jobId: "job-1",
+      workerId: "worker-A",
+      update: { progressDetails: details },
+    });
+
+    const call = asMock(mockPrisma.analysisJob.update).mock.calls[0][0];
+    expect(call.data.progressDetails).toEqual(details);
+  });
+
+  it("extends lock when workerId is supplied with details update", async () => {
+    asMock(mockPrisma.analysisJob.update).mockResolvedValueOnce({});
+
+    const before = Date.now();
+    await service.updateProgress({
+      jobId: "job-1",
+      workerId: "worker-A",
+      update: { progressDetails: { stage: "deep" } },
+    });
+    const after = Date.now();
+
+    const call = asMock(mockPrisma.analysisJob.update).mock.calls[0][0];
+    const lockExpiresAt: Date = call.data.lockExpiresAt;
+    expect(lockExpiresAt.getTime()).toBeGreaterThanOrEqual(before + 5 * 60 * 1000 - 100);
+    expect(lockExpiresAt.getTime()).toBeLessThanOrEqual(after + 5 * 60 * 1000 + 100);
+  });
+});
+
 describe("AnalysisJobService – exported singleton", () => {
   it("exports a singleton instance for the rest of the codebase", () => {
-    // The service is a class, but the file also exports a singleton. Importing
-    // it here keeps the import "used" so the module is not tree-shaken out.
     const { analysisJobService } = require("../services/analysisJobService");
     expect(analysisJobService).toBeInstanceOf(AnalysisJobService);
   });

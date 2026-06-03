@@ -37,6 +37,7 @@ async function runOnce(request: NextRequest): Promise<NextResponse> {
 
   const workerId = `serverless:${process.env.VERCEL_REGION || "local"}:${crypto.randomBytes(6).toString("hex")}`;
 
+  await analysisJobService.reclaimOrphanedJobs();
   const job = await analysisJobService.claimNextJob({ workerId });
   if (!job) {
     return new NextResponse(null, { status: 204 });

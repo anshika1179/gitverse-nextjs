@@ -158,6 +158,7 @@ export async function startAnalysisWorkerLoop(opts?: {
 
   while (!stopping) {
     try {
+      await analysisJobService.reclaimOrphanedJobs();
       const job = await analysisJobService.claimNextJob({
         workerId,
         lockMs,

@@ -12,6 +12,67 @@ export type JobProgressUpdate = {
 const DEFAULT_LOCK_MS = 5 * 60 * 1000;
 
 export class AnalysisJobService {
+  async reclaimOrphanedJobs(): Promise<number> {
+    const result = await prisma.analysisJob.updateMany({
+      where: {
+        status: "PROCESSING",
+        lockExpiresAt: { lt: new Date() },
+      },
+      data: {
+        status: "QUEUED",
+        lockedAt: null,
+        lockedBy: null,
+        lockExpiresAt: null,
+        nextRunAt: new Date(),
+        progressMessage: "Reclaimed after lock expiration",
+      },
+    });
+    return result.count;
+  }
+
+  async countOrphanedJobs(params?: { userId?: number }): Promise<number> {
+    const where: any = {
+      status: "PROCESSING",
+      lockExpiresAt: { lt: new Date() },
+    };
+    if (params?.userId) where.userId = params.userId;
+    return prisma.analysisJob.count({ where });
+  }
+
+  async getAnalysisStats(params: { userId: number }): Promise<{
+    total: number;
+    processing: number;
+    queued: number;
+    done: number;
+    failed: number;
+    stuck: number;
+  }> {
+    const [total, processing, queued, done, failed, stuck] =
+      await Promise.all([
+        prisma.analysisJob.count({ where: { userId: params.userId } }),
+        prisma.analysisJob.count({
+          where: { userId: params.userId, status: "PROCESSING" },
+        }),
+        prisma.analysisJob.count({
+          where: { userId: params.userId, status: "QUEUED" },
+        }),
+        prisma.analysisJob.count({
+          where: { userId: params.userId, status: "DONE" },
+        }),
+        prisma.analysisJob.count({
+          where: { userId: params.userId, status: "FAILED" },
+        }),
+        prisma.analysisJob.count({
+          where: {
+            userId: params.userId,
+            status: "PROCESSING",
+            lockExpiresAt: { lt: new Date() },
+          },
+        }),
+      ]);
+    return { total, processing, queued, done, failed, stuck };
+  }
+
   async createRepositoryAnalysisJob(params: {
     repositoryId: number;
     userId: number;
@@ -178,6 +239,8 @@ export class AnalysisJobService {
   }): Promise<AnalysisJob | null> {
     const lockMs = params.lockMs ?? DEFAULT_LOCK_MS;
 
+    await this.reclaimOrphanedJobs();
+
     // The claim must be atomic: a worker can only observe a job as available
     // while no other transaction holds the matching row lock. The CTE below
     // uses `FOR UPDATE SKIP LOCKED` so concurrent workers each pick a
@@ -230,12 +293,12 @@ export class AnalysisJobService {
     });
   }
 
-  async cleanupStaleJobs(): Promise<number> {
+  async cleanupStaleJobs(gracePeriodMs: number = 10 * 60 * 1000): Promise<number> {
     const stale = await prisma.analysisJob.updateMany({
       where: {
         status: "PROCESSING",
         lockExpiresAt: { lt: new Date() },
-        updatedAt: { lt: new Date(Date.now() - 60 * 60 * 1000) },
+        updatedAt: { lt: new Date(Date.now() - gracePeriodMs) },
       },
       data: {
         status: "FAILED",
