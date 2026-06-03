@@ -816,14 +816,14 @@
 }
 
 @layer utilities {
-  body:not(.user-is-tabbing) :focus-visible {
-    outline: none !important;
-    box-shadow: none !important;
+  :focus:not(:focus-visible) {
+    outline: none;
+    box-shadow: none;
   }
 
-  body.user-is-tabbing :focus-visible {
-    outline: 2px solid #2563eb !important;
-    outline-offset: 4px !important;
+  :focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 4px;
   }
 }
 

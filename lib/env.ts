@@ -6,22 +6,36 @@ const requiredEnvVars = [
   "TOKEN_ENCRYPTION_KEY",
 ] as const;
 
+function getEnvValidationSkipReasons() {
+  const reasons: string[] = [];
+
+  if (process.env.NODE_ENV === "test") {
+    reasons.push("NODE_ENV=test");
+  }
+  if (process.env.CI === "true") {
+    reasons.push("CI=true");
+  }
+  if (process.env.GITHUB_ACTIONS === "true") {
+    reasons.push("GITHUB_ACTIONS=true");
+  }
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    reasons.push("NEXT_PHASE=phase-production-build");
+  }
+
+  return reasons;
+}
+
 function shouldSkipEnvValidation() {
-  return (
-    process.env.NODE_ENV === "test" ||
-    // Allow skipping validation in local development to improve DX.
-    process.env.NODE_ENV === "development" ||
-    process.env.CI === "true" ||
-    process.env.GITHUB_ACTIONS === "true" ||
-    // Explicit opt-out for validation when needed
-    process.env.SKIP_ENV_VALIDATION === "true" ||
-    process.env.NEXT_PHASE === "phase-production-build"
-  );
+  return getEnvValidationSkipReasons().length > 0;
 }
 
 function validateEnv() {
-  if (shouldSkipEnvValidation()) {
-    console.log("⚠️ Skipping environment validation in test/CI environment");
+  const skipReasons = getEnvValidationSkipReasons();
+
+  if (skipReasons.length > 0) {
+    console.log(
+      `⚠️ Skipping environment validation: ${skipReasons.join(" | ")}`
+    );
 
     return;
   }
