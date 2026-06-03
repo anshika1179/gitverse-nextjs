@@ -13,6 +13,7 @@ import {
 } from "@/lib/middleware";
 import { repositoryService } from "@/lib/services/repositoryService";
 import { analysisJobService } from "@/lib/services/analysisJobService";
+import { getGithubAccessToken } from "@/lib/services/githubAuthService";
 import { triggerAnalysisWorkerWorkflow } from "@/lib/services/analysisWorkerTriggerService";
 import { GitService } from "@/lib/services/gitService";
 import { logger } from "@/lib/logger";
@@ -103,16 +104,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Backend check to catch non-existent or private GitHub repositories
-    const exists = await GitService.checkGithubRepositoryExists(normalizedUrl);
+    // Backend check to catch non-existent or private repositories
+    let exists = false;
+    
+    // First try without token (public check)
+    exists = await GitService.checkGithubRepositoryExists(normalizedUrl);
+    
+    if (!exists) {
+      // Try with user's github token (private check)
+      const token = await getGithubAccessToken(user.userId);
+      if (token) {
+        exists = await GitService.checkGithubRepositoryExists(normalizedUrl, token);
+      }
+    }
+
     if (!exists) {
       return NextResponse.json(
-        {
-          error: "NOT_FOUND",
-          message:
-            "Repository not found. Please ensure the URL is correct and the repository is public.",
-        },
-        { status: 404 },
+        { error: "GitHub repository not found or not accessible. If it is private, please sign in with GitHub." },
+        { status: 404 }
       );
     }
 
@@ -158,6 +167,7 @@ export async function POST(request: NextRequest) {
       description,
       targetDirectory: normalizedTargetDirectory ?? undefined,
       userId: user.userId,
+      isPrivate,
     });
 
     logger.info({ repositoryId: repository.id }, "Repository created");

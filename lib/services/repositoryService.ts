@@ -9,6 +9,7 @@ import { FileChangeType } from "@prisma/client";
 import { repoSyncLimiter } from "../utils/concurrencyLimiter";
 import { withDbRetry } from "../utils/dbRetry";
 import { getGeminiService } from "./geminiService";
+import { getGithubAccessToken } from "./githubAuthService";
 
 function yieldIfHighMemory(threshold?: number): Promise<void> {
   if (threshold === undefined) {
@@ -30,6 +31,7 @@ export interface AnalyzeRepositoryInput {
   description?: string;
   targetDirectory?: string;
   userId: number;
+  isPrivate?: boolean;
 }
 
 export type RepositoryAnalysisProgress = {
@@ -109,7 +111,8 @@ export class RepositoryService {
     try {
       // Check repository size before cloning
       const MAX_REPO_SIZE = 500 * 1024 * 1024; // 500 MB limit
-      const remoteSize = await GitService.getRemoteRepositorySize(repository.url);
+      const token = await getGithubAccessToken(userId);
+      const remoteSize = await GitService.getRemoteRepositorySize(repository.url, token);
       if (remoteSize !== null && remoteSize > MAX_REPO_SIZE) {
         throw new Error(`Repository exceeds maximum allowed size of 500MB (${(remoteSize / 1024 / 1024).toFixed(2)}MB).`);
       }
@@ -118,6 +121,7 @@ export class RepositoryService {
       gitService = await GitService.cloneRepository(repository.url, tempDir, {
         depth: 1,
         noSingleBranch: false,
+        accessToken: token,
       });
 
       const scopedPath = repository.targetDirectory
@@ -187,6 +191,7 @@ if (existingRepositoryName) {
         targetDirectory: input.targetDirectory ?? null,
         userId: input.userId,
         status: "pending",
+        isPrivate: input.isPrivate ?? false,
       },
     });
 
@@ -253,7 +258,8 @@ if (existingRepositoryName) {
 
       // Check repository size before cloning to prevent disk exhaustion DoS
       const MAX_REPO_SIZE = 500 * 1024 * 1024; // 500 MB limit
-      const remoteSize = await GitService.getRemoteRepositorySize(repository.url);
+      const token = await getGithubAccessToken(userId);
+      const remoteSize = await GitService.getRemoteRepositorySize(repository.url, token);
       if (remoteSize !== null && remoteSize > MAX_REPO_SIZE) {
         throw new Error(`Repository exceeds maximum allowed size of 500MB (${(remoteSize / 1024 / 1024).toFixed(2)}MB).`);
       }
@@ -265,6 +271,7 @@ if (existingRepositoryName) {
       });
       gitService = await GitService.cloneRepository(repository.url, tempDir, {
         signal,
+        accessToken: token,
         onProgress: (pct, msg) => {
           const analysisPct = 5 + Math.round((pct / 100) * 3);
           report({ progressPercent: Math.min(8, analysisPct), progressMessage: msg });
