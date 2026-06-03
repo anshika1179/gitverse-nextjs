@@ -1,14 +1,20 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
+import prisma from "@/lib/prisma";
 
-const lastKickAtByJobId = new Map<string, number>();
-
-const EPHEMERAL_SECRET = !process.env.ANALYSIS_RUNNER_SECRET
-  ? crypto.randomBytes(32).toString("hex")
-  : undefined;
-
-export function getEphemeralSecret(): string | undefined {
-  return EPHEMERAL_SECRET;
+function getRequiredSecret(): string {
+  const secret = process.env.ANALYSIS_RUNNER_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[AnalysisRunner] ANALYSIS_RUNNER_SECRET is not set. " +
+        "The endpoint will reject all requests until it is configured. " +
+        "Generate one with: openssl rand -hex 32"
+      );
+    }
+    return "";
+  }
+  return secret;
 }
 
 function timingSafeCompare(a: string, b: string): boolean {
@@ -24,8 +30,7 @@ function timingSafeCompare(a: string, b: string): boolean {
 }
 
 export function isAnalysisRunnerAuthorized(request: NextRequest): boolean {
-  const configuredSecret =
-    process.env.ANALYSIS_RUNNER_SECRET || EPHEMERAL_SECRET;
+  const configuredSecret = getRequiredSecret();
 
   if (!configuredSecret) {
     return false;
@@ -36,27 +41,26 @@ export function isAnalysisRunnerAuthorized(request: NextRequest): boolean {
     return true;
   }
 
-  const url = new URL(request.url);
-  const querySecret = url.searchParams.get("secret");
-  if (querySecret && timingSafeCompare(querySecret, configuredSecret)) {
-    return true;
-  }
-
   return false;
 }
 
-export function shouldThrottleJobKick(jobId: string): boolean {
-  const now = Date.now();
+export async function shouldThrottleJobKick(jobId: string): Promise<boolean> {
+  try {
+    const job = await prisma.analysisJob.findUnique({
+      where: { id: jobId },
+      select: { nextRunAt: true, status: true },
+    });
 
-  const lastKickAt = lastKickAtByJobId.get(jobId) ?? 0;
+    if (!job) return true;
 
-  if (now - lastKickAt < 5000) {
-    return true;
+    if (job.status === "PROCESSING") return true;
+
+    if (job.nextRunAt && job.nextRunAt > new Date()) return true;
+
+    return false;
+  } catch {
+    return false;
   }
-
-  lastKickAtByJobId.set(jobId, now);
-
-  return false;
 }
 
 export function registerUnhandledRejectionLogger() {

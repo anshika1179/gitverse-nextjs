@@ -21,3 +21,21 @@ export function isValidGitScope(value: string): boolean {
   if (!value || typeof value !== "string") return false;
   return /^[a-zA-Z0-9_./-]+$/.test(value);
 }
+
+/**
+ * Validates that a value is a valid Git SHA hash (SHA-1 or SHA-256).
+ * Only lowercase/uppercase hexadecimal characters, exactly 40 or 64 characters.
+ */
+export function isValidGitSha(value: string): boolean {
+  if (!value || typeof value !== "string") return false;
+  return /^[a-f0-9]{40}$/i.test(value) || /^[a-f0-9]{64}$/i.test(value);
+}
+
+/**
+ * Strict regex checking password complexity:
+ * - At least 8 characters
+ * - At least one uppercase letter
+ * - At least one lowercase letter
+ * - At least one digit
+ */
+export const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;

@@ -13,6 +13,8 @@ import {
   User,
   ChevronLeft,
   Menu,
+  FileDiff,
+  GitCompare,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -23,10 +25,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui";
+import { Button, ThemeToggle } from "@/components/ui";
 import { CommandPalette } from "@/components/ui/CommandPalette";
 import { toast } from "@/hooks/use-toast";
-import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -53,6 +54,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
 
   const navItems = [
     { icon: LayoutDashboard, label: "Visualise", path: "/dashboard" },
+    { icon: FileDiff, label: "Simulate PR", path: "/simulate-pr" },
+    { icon: GitCompare, label: "Compare", path: "/compare" },
     { icon: Search, label: "Search", path: "/search" },
     { icon: GitPullRequest, label: "Contribute", path: "/contribute" },
     { icon: Settings, label: "Settings", path: "/settings" },
@@ -179,7 +182,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
               <Menu className="h-5 w-5" />
             </Button>
 
-            <div className="flex-1 flex items-center justify-end px-4 sm:px-6">
+            <div className="flex-1 flex items-center justify-end px-4 sm:px-6 gap-3">
               <Button
                 variant="outline"
                 className="hidden sm:flex relative h-9 w-full justify-start rounded-[0.5rem] bg-background/50 text-sm text-muted-foreground sm:pr-12 md:w-56 lg:w-64 border-border/50 hover:bg-accent/50"
@@ -206,6 +209,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                         src={user.avatar}
                         alt={user.name}
                         className="rounded-full"
+                        loading="lazy"
                       />
                     ) : (
                       <User className="h-4 w-4 text-primary-foreground" />

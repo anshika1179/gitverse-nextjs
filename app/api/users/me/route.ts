@@ -6,6 +6,7 @@ import {
   isRateLimited,
   recordAttempt,
 } from "@/lib/services/rateLimitService";
+import { RedactSensitiveFields } from "@/services/security/redact-sensitive-fields";
 
 const MAX_ATTEMPTS = 3;
 const WINDOW_MS = 15 * 60 * 1000;
@@ -47,7 +48,7 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json(
-      {
+      RedactSensitiveFields.redact({
         id: userDetails.id,
         name: userDetails.name,
         email: userDetails.email,
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
         avatarUrl: (userDetails as any).image,
         isGoogleLinked: hasGoogleAccount,
         hasPassword: userDetails.passwordHash !== null,
-      },
+      }),
       {
         headers: {
           "Cache-Control": "no-store, no-cache, must-revalidate, private",

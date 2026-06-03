@@ -6,18 +6,10 @@ import {
 } from "@/lib/utils/analysisRunner";
 import { analysisJobService } from "@/lib/services/analysisJobService";
 import { repositoryService } from "@/lib/services/repositoryService";
+import { isRateLimited } from "@/lib/services/rateLimitService";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
-
-const lastRunAtByIp = new Map<string, number>();
-
-function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const last = lastRunAtByIp.get(ip) ?? 0;
-  if (now - last < 5000) return true;
-  lastRunAtByIp.set(ip, now);
-  return false;
-}
 
 function getClientIp(request: NextRequest): string {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -28,15 +20,47 @@ function getClientIp(request: NextRequest): string {
   return request.headers.get("x-real-ip") || request.ip || "unknown";
 }
 
+function logUnauthorizedAttempt(request: NextRequest, reason: string) {
+  const ip = getClientIp(request);
+  const url = request.url;
+  const method = request.method;
+  logger.warn(
+    { ip, method, url, reason },
+    "[AnalysisRunner] Unauthorized access attempt"
+  );
+}
+
 async function runOnce(request: NextRequest): Promise<NextResponse> {
   registerUnhandledRejectionLogger();
 
+  if (!process.env.ANALYSIS_RUNNER_SECRET) {
+    if (process.env.NODE_ENV === "production") {
+      logger.error(
+        "[AnalysisRunner] ANALYSIS_RUNNER_SECRET is not configured. " +
+        "Requests will be rejected until it is set."
+      );
+      return NextResponse.json(
+        {
+          error: "Server misconfigured: ANALYSIS_RUNNER_SECRET not set",
+          code: "SECRET_MISSING",
+        },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json(
+      { error: "ANALYSIS_RUNNER_SECRET is not configured" },
+      { status: 500 }
+    );
+  }
+
   if (!isAnalysisRunnerAuthorized(request)) {
+    logUnauthorizedAttempt(request, "invalid secret");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const ip = getClientIp(request);
-  if (isRateLimited(ip)) {
+  if (await isRateLimited(ip, "LOGIN", 5, 5 * 60 * 1000)) {
+    logUnauthorizedAttempt(request, "rate limited");
     return NextResponse.json(
       { error: "Too many requests. Please wait before retrying." },
       { status: 429 },
@@ -45,6 +69,7 @@ async function runOnce(request: NextRequest): Promise<NextResponse> {
 
   const workerId = `serverless:${process.env.VERCEL_REGION || "local"}:${crypto.randomBytes(6).toString("hex")}`;
 
+  await analysisJobService.reclaimOrphanedJobs();
   const job = await analysisJobService.claimNextJob({ workerId });
   if (!job) {
     return new NextResponse(null, { status: 204 });
@@ -60,7 +85,7 @@ async function runOnce(request: NextRequest): Promise<NextResponse> {
       },
     });
 
-    await repositoryService.analyzeRepository(job.repositoryId, {
+    await repositoryService.analyzeRepository(job.repositoryId, job.userId, {
       onProgress: async (update) => {
         await analysisJobService.updateProgress({
           jobId: job.id,

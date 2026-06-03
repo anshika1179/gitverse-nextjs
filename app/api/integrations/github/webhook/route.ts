@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyGitHubWebhookSignature } from "@/lib/utils/githubWebhook";
+import { GithubWebhookVerifier } from "@/lib/services/githubWebhookVerifier";
 import prisma from "@/lib/prisma";
 import crypto from "crypto";
+import { getClientIp } from "@/lib/services/rateLimitService";
+import { SafeHttpClient } from "@/services/security/safe-http-client";
+import { webhookQueue } from "@/lib/services/webhook-queue";
+import { dbHealthService } from "@/lib/services/db-health";
+import { webhookRetryService } from "@/lib/services/webhook-retry";
 
 export const runtime = "nodejs";
 
-type PullRequestWebhookPayload = {
+type WebhookPayload = {
   action?: string;
   installation?: { id?: number };
   repository?: {
@@ -16,6 +22,12 @@ type PullRequestWebhookPayload = {
     number?: number;
     html_url?: string;
     draft?: boolean;
+  };
+  issue?: {
+    number?: number;
+    title?: string;
+    body?: string;
+    html_url?: string;
   };
   sender?: {
     type?: string;
@@ -32,31 +44,38 @@ function shouldHandlePullRequestAction(action: string | undefined): boolean {
   );
 }
 
+function shouldHandleIssueAction(action: string | undefined): boolean {
+  return action === "opened";
+}
+
 export async function POST(request: NextRequest) {
+  // Note: Rate limiting is deferred to background processing or handled by in-memory limits
+  // to avoid exhausting the Prisma database connection pool synchronously.
+
   const rawBody = await request.text();
 
   const signature = request.headers.get("x-hub-signature-256");
   const event = request.headers.get("x-github-event");
   const secret = process.env.GITHUB_WEBHOOK_SECRET || "";
 
-  if (
-    !verifyGitHubWebhookSignature({
-      rawBody,
-      signature256Header: signature,
-      webhookSecret: secret,
-    })
-  ) {
+  const isValid = await GithubWebhookVerifier.verifySignature(request, rawBody) || verifyGitHubWebhookSignature({
+    rawBody,
+    signature256Header: signature,
+    webhookSecret: secret,
+  });
+
+  if (!isValid) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  if (event !== "pull_request") {
+  if (event !== "pull_request" && event !== "issues" && event !== "push") {
     return NextResponse.json(
       { ok: true, ignored: true, event },
       { status: 200 },
     );
   }
 
-  let payload: PullRequestWebhookPayload;
+  let payload: WebhookPayload;
   try {
     payload = JSON.parse(rawBody);
   } catch {
@@ -64,19 +83,30 @@ export async function POST(request: NextRequest) {
   }
 
   const action = payload.action;
-  if (!shouldHandlePullRequestAction(action)) {
-    return NextResponse.json(
-      { ok: true, ignored: true, action },
-      { status: 200 },
-    );
-  }
-
-  // Ignore draft PRs until they become ready_for_review
-  if (payload.pull_request?.draft && action !== "ready_for_review") {
-    return NextResponse.json(
-      { ok: true, ignored: true, reason: "draft" },
-      { status: 200 },
-    );
+  
+  if (event === "pull_request") {
+    if (!shouldHandlePullRequestAction(action)) {
+      return NextResponse.json(
+        { ok: true, ignored: true, action },
+        { status: 200 },
+      );
+    }
+    // Ignore draft PRs until they become ready_for_review
+    if (payload.pull_request?.draft && action !== "ready_for_review") {
+      return NextResponse.json(
+        { ok: true, ignored: true, reason: "draft" },
+        { status: 200 },
+      );
+    }
+  } else if (event === "issues") {
+    if (!shouldHandleIssueAction(action)) {
+      return NextResponse.json(
+        { ok: true, ignored: true, action },
+        { status: 200 },
+      );
+    }
+  } else if (event === "push") {
+    // We accept all push events
   }
 
   // Avoid replying to bots (including ourselves)
@@ -89,58 +119,35 @@ export async function POST(request: NextRequest) {
 
   const owner = payload.repository?.owner?.login;
   const repo = payload.repository?.name;
-  const number = payload.pull_request?.number;
+  const number = payload.pull_request?.number || payload.issue?.number;
   const installationId = payload.installation?.id;
 
-  if (!owner || !repo || !number || !installationId) {
+  if (!owner || !repo || (!number && event !== "push") || !installationId) {
     return NextResponse.json(
       {
         error: "Missing required fields",
-        details: { owner, repo, number, installationId },
+        details: { owner, repo, number, installationId, event },
       },
       { status: 400 },
     );
   }
 
-  // Store webhook event for async processing
+  // Store webhook event for async processing in-memory to prevent pool exhaustion
   try {
-    const webhookEvent = await prisma.webhookEvent.create({
-      data: {
-        event: event || "unknown",
-        action: action,
-        payload: payload as any,
-        status: "pending",
-      },
-    });
-
-    // Trigger internal worker asynchronously
     const baseUrl = process.env.NEXTAUTH_URL || `http://${request.headers.get("host") || "localhost:3000"}`;
-    const workerUrl = `${baseUrl}/api/internal/worker/webhook`;
-    
-    // Generate auth token for internal worker
-    const internalSecret = process.env.GITHUB_WEBHOOK_SECRET || process.env.JWT_SECRET || "";
-    const internalToken = `Bearer ${crypto.createHash('sha256').update(internalSecret).digest('hex')}`;
+    webhookQueue.enqueueWebhook(payload, event || "unknown", action, baseUrl);
 
-    // Non-blocking fetch
-    fetch(workerUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": internalToken,
-      },
-      body: JSON.stringify({ eventId: webhookEvent.id }),
-    }).catch(err => {
-      console.error("Failed to trigger webhook worker:", err);
-    });
+    // Automatically retry any previously failed jobs occasionally
+    webhookRetryService.requeueFailedJobs().catch(() => {});
 
     return NextResponse.json(
-      { ok: true, message: "Webhook accepted for processing", eventId: webhookEvent.id },
+      { ok: true, message: "Webhook accepted and queued for processing" },
       { status: 202 }
     );
   } catch (error) {
-    console.error("Error persisting webhook event:", error);
+    console.error("Error queueing webhook event:", error);
     return NextResponse.json(
-      { error: "Failed to persist webhook event" },
+      { error: "Failed to queue webhook event" },
       { status: 500 }
     );
   }

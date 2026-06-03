@@ -11,6 +11,8 @@ import { CommitHistory } from "@/components/repository/CommitHistory";
 import { Contributors } from "@/components/repository/Contributors";
 import { RepositoryInsights } from "@/components/repository/RepositoryInsights";
 import { RepositoryMentorTab } from "@/components/ai/RepositoryMentorTab";
+import { AIRepositoryOverlay } from "@/components/ai/AIRepositoryOverlay";
+import { SyncStatusCard } from "@/components/repository/SyncStatusCard";
 
 import {
   Home,
@@ -120,10 +122,12 @@ export default function RepositoryAnalysis() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pollingStartedAt = useRef<number | null>(null);
   const pollingJobRef = useRef<string | null>(null);
 
   useEffect(() => {
     fetchRepository();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   useEffect(() => {
@@ -176,6 +180,7 @@ export default function RepositoryAnalysis() {
     return () => {
       stopped = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repository?.status, repository?.latestJob?.id, job?.id, job?.status]);
 
   const fetchRepository = async () => {
@@ -204,6 +209,13 @@ export default function RepositoryAnalysis() {
       setLoading(false);
     } catch (err: any) {
       console.error("Error fetching repository:", err);
+
+      const status = err.response?.status;
+      if (status === 401) {
+        setError("Your session has expired. Please log in again to view your repository analysis.");
+        setLoading(false);
+        return;
+      }
 
       const isColdStart = err.response?.data?.error === "DATABASE_COLD_START";
       
@@ -256,7 +268,6 @@ export default function RepositoryAnalysis() {
 
         pollingStartedAt.current = null;
         setIsAnalyzing(false);
-        setAnalysisError(nextJob?.error || "The repository analysis failed.");
         toast({
           title: "Analysis failed",
           description: msg,
@@ -266,6 +277,20 @@ export default function RepositoryAnalysis() {
     } catch (err: any) {
       console.error("Error fetching analysis job:", err);
       
+      const status = err.response?.status;
+      if (status === 401) {
+        const msg = "Your session has expired. The analysis is continuing securely in the background and will be available in your dashboard when you log back in.";
+        setError(msg);
+        setIsAnalyzing(false);
+        pollingStartedAt.current = null;
+        toast({
+          title: "Session Expired",
+          description: msg,
+          variant: "default",
+        });
+        return;
+      }
+
       const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || "Failed to connect to the analysis service.";
       
       // 1. Surface inline error state
@@ -277,7 +302,7 @@ export default function RepositoryAnalysis() {
       // 3. Show a one-time toast notification
       toast({
         title: "Error checking analysis status",
-        description: err.response?.data?.error || err.response?.data?.message || err.message || "Failed to connect to the analysis service.",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -486,7 +511,18 @@ export default function RepositoryAnalysis() {
                 </div>
 
                 {/* Content */}
-                <div className="animate-fade-in-up">{renderContent()}</div>
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 animate-fade-in-up">
+                  <div className="lg:col-span-3 space-y-6">
+                    {renderContent()}
+                  </div>
+                  <div className="lg:col-span-1">
+                    <SyncStatusCard 
+                      repositoryId={repository.id.toString()} 
+                      lastSynchronizedAt={repository.lastSynchronizedAt}
+                      initialJobs={repository.syncJobs || []}
+                    />
+                  </div>
+                </div>
               </>
             )}
           </>
@@ -545,6 +581,28 @@ export default function RepositoryAnalysis() {
           </div>
         </Modal>
       </div>
+      {/* Floating AI Chat Overlay with Global Codebase RAG */}
+      {repository && (
+        <AIRepositoryOverlay
+          repository={{
+            id: repository.id,
+            name: repository.name,
+            description: repository.description,
+            languages: repository.languages || [],
+            stats: {
+              commits: repository.commits?.length || 0,
+              contributors: repository.contributors?.length || 0,
+              files: repository.files?.length || 0,
+              branches: repository.branches?.length || 0,
+              stars: repository.stars || 0,
+              forks: repository.forks || 0,
+            },
+            recentCommits: repository.commits || [],
+            contributors: repository.contributors || [],
+            branches: repository.branches || [],
+          }}
+        />
+      )}
     </DashboardLayout>
   );
 }
