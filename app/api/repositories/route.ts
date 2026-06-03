@@ -2,6 +2,7 @@ import {
   normalizeKnownRepoHttpUrl,
   normalizeTargetDirectory,
 } from "@/lib/utils/repositoryUtils";
+import { validateSafeUrl } from "@/lib/utils/ssrfValidator";
 import { NextRequest, NextResponse } from "next/server";
 import {
   isHttpError,
@@ -78,6 +79,14 @@ export async function POST(request: NextRequest) {
     if (!normalizedUrl) {
       return apiError(
         "Invalid repository URL. Use a full repository URL like https://github.com/owner/repo",
+        400,
+      );
+    }
+
+    const isSafe = await validateSafeUrl(normalizedUrl);
+    if (!isSafe) {
+      return apiError(
+        "Invalid repository URL. The URL resolves to an untrusted or private network address.",
         400,
       );
     }
