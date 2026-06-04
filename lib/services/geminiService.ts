@@ -85,6 +85,16 @@ export class GeminiService {
       ) {
         throw new Error("Gemini API quota exceeded. Please try again later.");
       }
+      
+      if (
+        message.includes("400 bad request") || 
+        message.includes("token limit") || 
+        message.includes("maximum context length") ||
+        message.includes("too large") ||
+        error?.status === 400
+      ) {
+        throw new Error("Repository or payload is too large for AI analysis context limit. Please try again with a smaller scope.");
+      }
 
       throw new Error(`AI analysis failed: ${error.message}`);
     }
@@ -119,6 +129,16 @@ export class GeminiService {
       ) {
         throw new Error("Gemini API quota exceeded. Please try again later.");
       }
+      
+      if (
+        message.includes("400 bad request") || 
+        message.includes("token limit") || 
+        message.includes("maximum context length") ||
+        message.includes("too large") ||
+        error?.status === 400
+      ) {
+        throw new Error("Repository or payload is too large for AI analysis context limit. Please try again with a smaller scope.");
+      }
 
       throw new Error(`AI analysis failed: ${error.message}`);
     }
@@ -151,6 +171,16 @@ export class GeminiService {
         message.includes("429")
       ) {
         throw new Error("Gemini API quota exceeded. Please try again later.");
+      }
+      
+      if (
+        message.includes("400 bad request") || 
+        message.includes("token limit") || 
+        message.includes("maximum context length") ||
+        message.includes("too large") ||
+        error?.status === 400
+      ) {
+        throw new Error("Context is too large for AI chat. Please try again with a smaller scope.");
       }
 
       throw new Error(`AI chat failed: ${error.message}`);
@@ -205,6 +235,16 @@ export class GeminiService {
         message.includes("429")
       ) {
         throw new Error("Gemini API quota exceeded. Please try again later.");
+      }
+
+      if (
+        message.includes("400 bad request") || 
+        message.includes("token limit") || 
+        message.includes("maximum context length") ||
+        message.includes("too large") ||
+        error?.status === 400
+      ) {
+        throw new Error("Prompt is too large for AI context limit. Please try again with a smaller scope.");
       }
 
       throw new Error(`AI chat failed: ${error.message}`);
