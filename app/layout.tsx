@@ -8,7 +8,9 @@ import { NextAuthProvider } from "@/components/auth/NextAuthProvider";
 import { Toaster } from "@/components/ui/toaster";
 import { ScrollToTop } from "@/components/ui/ScrollToTop";
 import { FocusRingManager } from "@/components/ui/FocusRingManager";
+import SessionGuard from "@/components/auth/SessionGuard";
 import "./globals.css";
+
 
 const inter = Inter({
   subsets: ["latin"],
@@ -83,15 +85,17 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 
         <ThemeProvider>
           <NextAuthProvider>
-            <AuthProvider>
-              <FocusRingManager />
-              <main id="main-content">
-                {children}
-              </main>
+            <SessionGuard>
+              <AuthProvider>
+                <FocusRingManager />
+                <main id="main-content">
+                  {children}
+                </main>
 
-              <Toaster />
-              <ScrollToTop />
-            </AuthProvider>
+                <Toaster />
+                <ScrollToTop />
+              </AuthProvider>
+            </SessionGuard>
           </NextAuthProvider>
         </ThemeProvider>
       </body>
