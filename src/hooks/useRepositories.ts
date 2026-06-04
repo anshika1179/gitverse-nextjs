@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import axios from "axios";
 import { buildApiUrl } from "../services/apiConfig";
+
 export interface Repository {
   id: string;
   name: string;
@@ -40,7 +41,7 @@ export function useRepositories({ limit = DEFAULT_LIMIT } = {}): UseRepositories
 
   const isFetchingRef = useRef<boolean>(false);
   const initRef = useRef<boolean>(false);
-  const abortControllerRef = useRef<AbortController | null>(null); // ✅ Added
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const fetchRepos = useCallback(async (isLoadMore = false) => {
     // Concurrency lock: Prevent duplicate requests
@@ -49,11 +50,12 @@ export function useRepositories({ limit = DEFAULT_LIMIT } = {}): UseRepositories
     // Prevent loadMore if no more items
     if (isLoadMore && !hasMore) return;
 
-    // ✅ Abort any in-flight request before starting a new one
+    // Abort any in-flight request before starting a new one
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    abortControllerRef.current = new AbortController();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     isFetchingRef.current = true;
 
@@ -70,60 +72,54 @@ export function useRepositories({ limit = DEFAULT_LIMIT } = {}): UseRepositories
       const url = new URL(buildApiUrl("/api/repositories"));
       url.searchParams.set("limit", limit.toString());
 
-      if (isLoadMore && cursor !== undefined) {
-        url.searchParams.set("cursor", cursor.toString());
+      if (isLoadMore && cursorRef.current !== undefined) {
+        url.searchParams.set("cursor", cursorRef.current.toString());
       }
-    },
-    [hasMore, limit]
-  );
 
       const response = await axios.get(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: abortControllerRef.current.signal, // ✅ Pass signal to axios
+        headers: {
+          Authorization: "Bearer ",
+        },
+        signal: controller.signal,
       });
 
-      const { data, nextCursor, hasMore: newHasMore } = response.data;
+      // apiSuccess wraps response in { error, data: { repositories, nextCursor, hasMore } }
+      const { repositories, nextCursor: newCursor, hasMore: newHasMore } = response.data.data || {};
 
-      const newRepos = Array.isArray(data) ? data : [];
+      const newRepos = Array.isArray(repositories) ? repositories : [];
 
       setRepos((prev) => {
         if (!isLoadMore) return newRepos;
 
-        // Frontend Deduplication by ID
         const existingIds = new Set(prev.map((r) => r.id));
-        const deduplicatedNew = newRepos.filter(
-          (r: Repository) => !existingIds.has(r.id)
-        );
+        const filtered = newRepos.filter((r: Repository) => !existingIds.has(r.id));
 
-        return [...prev, ...deduplicatedNew];
+        return [...prev, ...filtered];
       });
 
-      setCursor(nextCursor);
+      cursorRef.current = newCursor;
       setHasMore(newHasMore);
     } catch (err: any) {
-      // ✅ Ignore errors caused by intentional abort (component unmount)
-      if (axios.isCancel(err) || err?.name === "AbortError") return;
-      console.error("Error fetching repositories:", err);
-      setError(
-        err.response?.data?.error ||
-          err.message ||
-          "Failed to fetch repositories."
-      );
+      if (err.name !== "CanceledError" && err.name !== "AbortError" && !axios.isCancel(err)) {
+        setError(err.response?.data?.error || err.message || "Failed to fetch repositories.");
+      }
     } finally {
-      setIsLoading(false);
-      setIsLoadingMore(false);
-      isFetchingRef.current = false;
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+        isFetchingRef.current = false;
+      }
     }
-  }, [cursor, hasMore, limit]);
+  }, [hasMore, limit]);
 
-  // ✅ CLEAN useEffect (no duplicate fetch logic)
+  // CLEAN useEffect (no duplicate fetch logic)
   useEffect(() => {
     if (!initRef.current) {
       initRef.current = true;
       fetchRepos();
     }
 
-    // ✅ Cleanup: abort in-flight request when component unmounts
+    // Cleanup: abort in-flight request when component unmounts
     return () => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
