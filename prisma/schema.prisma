@@ -58,6 +58,8 @@ model User {
   organizationMemberships OrganizationMember[]
   mapAnnotations          MapAnnotation[]
   annotationActivities    AnnotationActivity[]
+  mfaConfig               MfaConfig?
+  auditLogs               AuditLog[]
 
   @@map("users")
 }
@@ -696,6 +698,9 @@ model AuditLog {
   details        Json
   createdAt      DateTime @default(now()) @map("created_at")
 
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
   @@index([organizationId, createdAt(sort: Desc)])
   @@index([repositoryId, createdAt(sort: Desc)])
   @@map("audit_logs")
@@ -750,4 +755,26 @@ model RepositoryKnowledge {
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 
   @@map("repository_knowledge")
+}
+
+/// MFA configuration for TOTP-based Multi-Factor Authentication.
+/// Stores the encrypted TOTP secret and hashed backup codes per user.
+model MfaConfig {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @unique @map("user_id")
+  /// Base32-encoded TOTP secret (should be encrypted at rest via application-layer encryption)
+  totpSecret    String   @map("totp_secret") @db.Text
+  /// Whether TOTP MFA is active for this user
+  isEnabled     Boolean  @default(false) @map("is_enabled")
+  /// One-time backup codes (stored as bcrypt hashes, comma-separated)
+  backupCodes   String?  @map("backup_codes") @db.Text
+  /// Timestamp of the last successful MFA verification
+  lastVerifiedAt DateTime? @map("last_verified_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("mfa_configs")
 }
