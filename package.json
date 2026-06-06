@@ -92,7 +92,6 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/jest": "^29.5.14",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/lru-cache": "^7.10.9",
     "@types/node": "^25.9.1",
     "@types/opossum": "^8.1.9",
     "@types/react": "^18.2.43",
