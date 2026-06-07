@@ -18,8 +18,11 @@ export async function exportElement(elementId: string, format: 'png' | 'pdf', fi
     const { default: jsPDF } = await import("jspdf");
     const imgData = canvas.toDataURL("image/png");
     const pdf = new jsPDF("p", "mm", "a4");
-    const pdfWidth = 210;
-    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const scaleFactor = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
+    const pdfWidth = canvas.width * scaleFactor;
+    const pdfHeight = canvas.height * scaleFactor;
     pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
     pdf.save(`${fileName}.pdf`);
   }

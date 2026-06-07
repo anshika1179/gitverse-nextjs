@@ -49,9 +49,39 @@ export function RepositoryInsights({
   const [progressMessage, setProgressMessage] = useState("");
   const [progressPercent, setProgressPercent] = useState(0);
 
- 
-const downloadPNG = () => exportElement("repo-analysis", "png", "repository-analysis");
-const downloadPDF = () => exportElement("repo-analysis", "pdf", "repository-analysis");
+  const downloadPNG = async () => {
+    try {
+      await exportElement("repo-analysis", "png", "repository-analysis");
+      toast({
+        title: "Success",
+        description: "Repository analysis exported as PNG.",
+      });
+    } catch (error: any) {
+      console.error("Failed to export PNG:", error);
+      toast({
+        title: "Export failed",
+        description: error.message || "Failed to export repository analysis as PNG.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const downloadPDF = async () => {
+    try {
+      await exportElement("repo-analysis", "pdf", "repository-analysis");
+      toast({
+        title: "Success",
+        description: "Repository analysis exported as PDF.",
+      });
+    } catch (error: any) {
+      console.error("Failed to export PDF:", error);
+      toast({
+        title: "Export failed",
+        description: error.message || "Failed to export repository analysis as PDF.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const generateArchitectureMarkdown = async () => {
     if (!repository?.id) return;
