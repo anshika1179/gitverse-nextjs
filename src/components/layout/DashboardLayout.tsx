@@ -150,7 +150,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
                 </Link>
               </div>
 
-              {/* Navigation - Mobile Menu Local State Alignment */}
+              {/* Navigation - Mobile */}
               <nav className="flex-1 p-4 space-y-2">
                 {navItems.map((item) => {
                   const active = isActive(item.path);
@@ -219,7 +219,11 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
               {/* User Profile Dropdown */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="gap-2">
+                  <Button
+                    variant="ghost"
+                    className="gap-2"
+                    aria-label={user?.name ? `${user.name} account menu` : "Open account menu"}
+                  >
                     <div className="h-8 w-8 rounded-full bg-gradient-primary flex items-center justify-center">
                       {user?.avatar ? (
                         <Image
